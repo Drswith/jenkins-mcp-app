@@ -69,6 +69,7 @@ web_modules/
 .env
 .env.*
 !.env.example
+.local/
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
@@ -80,7 +81,9 @@ out
 
 # Nuxt.js build / generate output
 .nuxt
-dist
+/dist
+/prototype/dist/
+/release/.jenkins-build-*/
 .output
 
 # Gatsby files

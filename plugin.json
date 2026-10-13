@@ -1,0 +1,28 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "jenkins",
+  "version": "0.1.7",
+  "description": "通过 Jenkins MCP 或 Remote API 查看任务与构建，并按请求触发构建。",
+  "repository": "https://github.com/Drswith/jenkins-mcp-app",
+  "license": "MIT",
+  "keywords": ["jenkins", "ci", "mcp"],
+  "extensions": {
+    "com.openai": {
+      "onboardingSkill": "./skills/jenkins-setup/SKILL.md",
+      "interface": {
+        "displayName": "Jenkins",
+        "shortDescription": "查看 Jenkins 任务与构建",
+        "longDescription": "查看任务状态、队列、构建详情、日志和测试结果，并在明确请求时触发构建。",
+        "developerName": "Drswith",
+        "category": "Developer Tools",
+        "capabilities": ["Read", "Write"],
+        "composerIcon": "./assets/jenkins-build-light.svg",
+        "composerIconDark": "./assets/jenkins-build-dark.svg",
+        "logo": "./assets/jenkins-headshot.png",
+        "logoDark": "./assets/jenkins-headshot.png",
+        "websiteURL": "https://github.com/Drswith/jenkins-mcp-app",
+        "defaultPrompt": ["查看我的 Jenkins 任务状态", "分析一次 Jenkins 构建失败的原因"]
+      }
+    }
+  }
+}

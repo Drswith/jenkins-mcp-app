@@ -1,0 +1,12 @@
+{
+  "name": "jenkins-local",
+  "interface": { "displayName": "Jenkins local" },
+  "plugins": [
+    {
+      "name": "jenkins",
+      "source": { "source": "local", "path": "./release/jenkins" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Developer Tools"
+    }
+  ]
+}

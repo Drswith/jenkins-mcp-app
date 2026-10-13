@@ -1,0 +1,11 @@
+.git
+.local
+node_modules
+prototype
+docs
+assets
+src
+ui
+test
+!test/local-jenkins
+**/*.log

@@ -1,0 +1,43 @@
+services:
+  jenkins:
+    image: jenkins/jenkins:2.580.1-jdk21@sha256:a660310e39ade10631f774bacd5219de767dfd08947ea5c32a739b5e5bb382c1
+    container_name: jenkins-codex-local-test
+    entrypoint: ["/usr/bin/tini", "--", "/bin/sh", "/opt/jenkins-bootstrap/start.sh"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      JAVA_OPTS: -Djenkins.install.runSetupWizard=false
+    volumes:
+      - jenkins-home:/var/jenkins_home
+      - ./start.sh:/opt/jenkins-bootstrap/start.sh:ro
+      - ./plugins.txt:/opt/jenkins-bootstrap/plugins.txt:ro
+      - ./init.groovy:/opt/jenkins-bootstrap/init.groovy:ro
+
+  git-fixture:
+    profiles: [scm]
+    build: ./git
+    image: jenkins-codex-git-fixture:latest
+    container_name: jenkins-codex-git-fixture
+
+  preview:
+    profiles: [preview]
+    build:
+      context: ../..
+      dockerfile: test/local-jenkins/Preview.Dockerfile
+    image: jenkins-codex-ui-preview:latest
+    container_name: jenkins-codex-ui-preview
+    depends_on:
+      - jenkins
+    ports:
+      - "127.0.0.1:4175:4175"
+    environment:
+      JENKINS_CONFIG_FILE: /run/secrets/jenkins-config.json
+      JENKINS_URL: http://jenkins:8080/
+      JENKINS_UI_PREVIEW_LIVE: "1"
+      JENKINS_UI_PREVIEW_PORT: "4175"
+      JENKINS_UI_PREVIEW_HOST: 0.0.0.0
+    volumes:
+      - ../../.local/jenkins-test/config.json:/run/secrets/jenkins-config.json:ro
+
+volumes:
+  jenkins-home:

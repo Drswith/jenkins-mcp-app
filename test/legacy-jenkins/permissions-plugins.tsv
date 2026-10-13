@@ -1,0 +1,3 @@
+# Jenkins core 2.263.1 compatibility pin for the SG restricted-account fixture.
+# Matrix Auth 2.6.11 requires Jenkins 2.222.1 and has no mandatory plugin dependencies.
+matrix-auth	2.6.11	f70d8ba943478fb4966375e7c4ab213e7a0665bd88e9558d9c12492f1dee7dbd	https://updates.jenkins.io/download/plugins/matrix-auth/2.6.11/matrix-auth.hpi
