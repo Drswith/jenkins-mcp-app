@@ -27,6 +27,7 @@ function validateApiArguments(tool, args) {
     if (!property) throw new Error(`Unknown argument ${key}`);
     if (property.type === "string" && (typeof value !== "string" || !value.trim() || (property.enum && !property.enum.includes(value)))) throw new Error(`${key} must be a supported nonempty string`);
     if (property.type === "integer" && (!Number.isInteger(value) || value < property.minimum)) throw new Error(`${key} must be a positive integer`);
+    if (property.type === "boolean" && typeof value !== "boolean") throw new Error(`${key} must be a boolean`);
     if (property.type === "object") {
       if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${key} must be an object`);
       for (const [name, item] of Object.entries(value)) {

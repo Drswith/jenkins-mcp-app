@@ -209,6 +209,11 @@ test("stdio MCP bridge reads and schedules through Jenkins API", async () => {
     assert.equal(cardResource.contents[0].mimeType, "text/html;profile=mcp-app");
     assert.match(cardResource.contents[0].text, /data-mode="card"/);
     assert.deepEqual(cardResource.contents[0]._meta.ui.csp.connectDomains, []);
+    assert.deepEqual(cardResource.contents[0]._meta["openai/ui"], {
+      availableDisplayModes: ["inline", "fullscreen"], preferredDisplayMode: "inline",
+    });
+    const workspaceResource = await client.readResource({ uri: uiManifest.workspace.uri });
+    assert.deepEqual(workspaceResource.contents[0]._meta["openai/ui"], { availableDisplayModes: ["fullscreen"] });
     const jobs = await client.callTool({ name: "getJobs", arguments: {} });
     assert.equal(jobs.structuredContent.jobs[0].name, "folder");
     assert.equal((await client.callTool({ name: "uiListJobs", arguments: {} })).structuredContent.jobs[0].name, "folder");
@@ -216,8 +221,17 @@ test("stdio MCP bridge reads and schedules through Jenkins API", async () => {
     assert.equal(build.structuredContent.result, "FAILURE");
     const card = await client.callTool({ name: "showJenkinsBuildCard", arguments: { jobFullName: "folder/build main", buildNumber: 42 } });
     assert.equal(card.structuredContent.build.number, 42);
+    assert.equal(card.structuredContent.autoExpand, false);
+    const expandedBuildCard = await client.callTool({ name: "showJenkinsBuildCard", arguments: { jobFullName: "folder/build main", buildNumber: 42, autoExpand: true } });
+    assert.equal(expandedBuildCard.structuredContent.autoExpand, true);
     const queueCard = await client.callTool({ name: "showJenkinsQueueCard", arguments: { jobFullName: "folder/build main", queueId: 7 } });
     assert.equal(queueCard.structuredContent.queue.why, "等待空闲执行器");
+    assert.equal(queueCard.structuredContent.autoExpand, true);
+    const inlineQueueCard = await client.callTool({ name: "showJenkinsQueueCard", arguments: { jobFullName: "folder/build main", queueId: 7, autoExpand: false } });
+    assert.equal(inlineQueueCard.structuredContent.autoExpand, false);
+    const invalidExpand = await client.callTool({ name: "showJenkinsQueueCard", arguments: { jobFullName: "folder/build main", queueId: 7, autoExpand: "true" } });
+    assert.equal(invalidExpand.isError, true);
+    assert.match(invalidExpand.content[0].text, /autoExpand must be a boolean/);
     assert.equal((await client.callTool({ name: "uiGetQueueItem", arguments: { queueId: 7 } })).structuredContent.id, 7);
     const params = await client.callTool({ name: "uiGetJobParameters", arguments: { jobFullName: "folder/build main" } });
     assert.equal(params.structuredContent.parameters[0].defaultValue, "main");
@@ -237,6 +251,7 @@ test("stdio MCP bridge reads and schedules through Jenkins API", async () => {
     assert.equal(forbiddenStages.reason, "permission_denied");
     const expiredQueue = await client.callTool({ name: "showJenkinsQueueCard", arguments: { jobFullName: "folder/build main", queueId: 8 } });
     assert.equal(expiredQueue.structuredContent.build.number, 42);
+    assert.equal(expiredQueue.structuredContent.autoExpand, true);
     const unmatchedExpiredQueue = await client.callTool({ name: "showJenkinsQueueCard", arguments: { jobFullName: "folder/build main", queueId: 99 } });
     assert.equal(unmatchedExpiredQueue.structuredContent.reason, "expired");
     assert.equal(unmatchedExpiredQueue.structuredContent.build, undefined);

@@ -4,22 +4,26 @@ import { App, applyDocumentTheme } from "@modelcontextprotocol/ext-apps";
 import { CheckCircle2, CircleAlert, Clock3, ExternalLink, Layers3, LoaderCircle, MessageCircle, RefreshCw, Search, X } from "lucide-react";
 import jenkinsHeadshot from "../../assets/jenkins-headshot.png";
 import { InlineCard } from "./inline.jsx";
+import { createAutoExpandController } from "./display-mode.js";
 import "./style.css";
 
 const mode = document.body.dataset.mode;
-const bridge = new App({ name: "jenkins-plugin-ui", version: "0.1.0" });
+const bridge = new App({ name: "jenkins-plugin-ui", version: document.body.dataset.uiVersion }, {
+  availableDisplayModes: mode === "workspace" ? ["fullscreen"] : ["inline", "fullscreen"],
+});
+document.body.dataset.documentId = crypto.randomUUID();
 const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
 let hasHostTheme = false;
 applyDocumentTheme(systemTheme.matches ? "dark" : "light");
 systemTheme.addEventListener("change", (event) => {
   if (!hasHostTheme) applyDocumentTheme(event.matches ? "dark" : "light");
 });
-bridge.onhostcontextchanged = ({ theme }) => {
+function applyHostTheme({ theme } = {}) {
   if (theme) {
     hasHostTheme = true;
     applyDocumentTheme(theme);
   }
-};
+}
 
 function resultData(result) {
   if (result?.isError) throw new Error(result.content?.find((item) => item.type === "text")?.text || "Jenkins 请求失败");
@@ -93,6 +97,9 @@ function ParameterDetails({ parameters, gitChoices, readGitChoices }) {
 
 function jobErrorMessage(cause) {
   const message = cause?.message || "Jenkins 请求失败";
+  if (/fetch failed/i.test(message)) return "连接 Jenkins 时网络请求失败，请重试读取。";
+  if (/Jenkins network request failed/i.test(message)) return `连接 Jenkins 时网络请求失败${message.match(/\([A-Z_]+\)/)?.[0] || ""}，请重试读取。`;
+  if (/Jenkins request timed out/i.test(message)) return "读取 Jenkins 超时，请重试读取。";
   if (/\b403\b|forbidden|无权限/i.test(message)) return "无权限读取该任务或构建。";
   if (/\b404\b|not found|不存在/i.test(message)) return "该任务或构建不存在。";
   return message;
@@ -100,7 +107,9 @@ function jobErrorMessage(cause) {
 
 function Root() {
   const [ready, setReady] = useState(false);
+  const [hostContext, setHostContext] = useState(null);
   const [error, setError] = useState("");
+  const [jobsError, setJobsError] = useState("");
   const [input, setInput] = useState({});
   const [initial, setInitial] = useState(null);
   const [jobs, setJobs] = useState([]);
@@ -119,29 +128,55 @@ function Root() {
   const [buildLoading, setBuildLoading] = useState(false);
   const [noBuild, setNoBuild] = useState(false);
   const detailRequestRef = React.useRef(0);
+  const jobsRequestRef = React.useRef(0);
+  const expandRef = React.useRef(null);
+  if (!expandRef.current) expandRef.current = createAutoExpandController(bridge, (state) => {
+    document.body.dataset.autoExpandState = state.status;
+    if (state.fromMode) document.body.dataset.autoExpandFrom = state.fromMode;
+    if (state.reason) document.body.dataset.autoExpandReason = state.reason;
+    if (state.mode) document.body.dataset.displayMode = state.mode;
+    if (["requesting", "expanded", "already-fullscreen", "unsupported", "not-applied", "failed"].includes(state.status)) {
+      bridge.sendLog({ level: "info", logger: "jenkins-display-mode", data: state }).catch(() => {});
+    }
+  });
 
   useEffect(() => {
+    bridge.onhostcontextchanged = () => {
+      const context = bridge.getHostContext();
+      applyHostTheme(context);
+      setHostContext(context);
+      if (context?.displayMode && !document.body.dataset.initialDisplayMode) document.body.dataset.initialDisplayMode = context.displayMode;
+      if (context?.displayMode) document.body.dataset.displayMode = context.displayMode;
+    };
     bridge.ontoolinput = (value) => setInput(value.arguments || {});
     bridge.ontoolresult = (value) => {
       try { setInitial(resultData(value)); } catch (cause) { setError(cause.message); }
     };
     bridge.connect().then(() => {
-      const theme = bridge.getHostContext()?.theme;
-      if (theme) {
-        hasHostTheme = true;
-        applyDocumentTheme(theme);
-      }
+      const context = bridge.getHostContext();
+      applyHostTheme(context);
+      setHostContext(context);
+      if (context?.displayMode && !document.body.dataset.initialDisplayMode) document.body.dataset.initialDisplayMode = context.displayMode;
+      if (context?.displayMode) document.body.dataset.displayMode = context.displayMode;
       setReady(true);
     }).catch((cause) => setError(cause.message || "无法连接宿主"));
   }, []);
 
+  useEffect(() => {
+    if (mode !== "card") return;
+    // Queue cards also work with older server connections that omit autoExpand.
+    const requested = input.autoExpand ?? initial?.autoExpand ?? Number.isInteger(input.queueId ?? initial?.queueId);
+    expandRef.current.update({ ready, requested, context: hostContext });
+  }, [ready, hostContext, input.autoExpand, input.queueId, initial?.autoExpand, initial?.queueId]);
+
   async function refresh() {
-    setBusy(true); setError("");
+    const requestId = ++jobsRequestRef.current;
+    setBusy(true); setJobsError("");
     try {
       const result = await call("uiListJobs");
-      setJobs(jobsFrom(result));
-    } catch (cause) { setError(cause.message); }
-    finally { setBusy(false); }
+      if (requestId === jobsRequestRef.current) setJobs(jobsFrom(result));
+    } catch (cause) { if (requestId === jobsRequestRef.current) setJobsError(jobErrorMessage(cause)); }
+    finally { if (requestId === jobsRequestRef.current) setBusy(false); }
   }
 
   async function openBuild(jobFullName, buildNumber) {
@@ -185,10 +220,11 @@ function Root() {
   }
 
   async function openFolder(jobFullName) {
-    setBusy(true); setError("");
-    try { setJobs(jobsFrom(await call("uiGetJob", { jobFullName }))); }
-    catch (cause) { setError(cause.message); }
-    finally { setBusy(false); }
+    const requestId = ++jobsRequestRef.current;
+    setBusy(true); setJobsError("");
+    try { const result = await call("uiGetJob", { jobFullName }); if (requestId === jobsRequestRef.current) setJobs(jobsFrom(result)); }
+    catch (cause) { if (requestId === jobsRequestRef.current) setJobsError(jobErrorMessage(cause)); }
+    finally { if (requestId === jobsRequestRef.current) setBusy(false); }
   }
 
   async function showLog() {
@@ -249,12 +285,13 @@ function Root() {
     </>}
   </section>;
 
-  if (mode === "panel") return <main className="panel-shell">{error && <div className="alert" role="alert">{error}</div>}{notice && <div className="notice" role="status">{notice}</div>}{mode === "panel" && jobs.length > 0 && <div className="panel-select"><label>选择任务<select value={selected || ""} onChange={(event) => openBuild(event.target.value)}><option value="">请选择</option>{jobs.filter((job) => !job.folder).map((job) => <option key={job.name} value={job.name}>{job.name}</option>)}</select></label></div>}{detail}</main>;
+  const listError = jobsError && <div className="alert" role="alert">任务列表读取失败：{jobsError}<button type="button" onClick={refresh} disabled={busy}>重试任务列表</button></div>;
+  if (mode === "panel") return <main className="panel-shell">{error && <div className="alert" role="alert">构建操作失败：{error}</div>}{listError}{notice && <div className="notice" role="status">{notice}</div>}{mode === "panel" && jobs.length > 0 && <div className="panel-select"><label>选择任务<select value={selected || ""} onChange={(event) => openBuild(event.target.value)}><option value="">请选择</option>{jobs.filter((job) => !job.folder).map((job) => <option key={job.name} value={job.name}>{job.name}</option>)}</select></label></div>}{detail}</main>;
 
   return <main className="workspace-shell">
     <nav className="workspace-nav"><div className="brand"><img src={jenkinsHeadshot} alt="" /><strong>Jenkins</strong></div><span className="nav-item active"><Layers3 size={18} />构建工作台</span><small>数据来自当前 Jenkins 连接</small></nav>
     <section className="workspace-main"><header className="workspace-heading"><div><h1>构建概览</h1><p>查看任务和最近构建</p></div><button aria-label="刷新任务" onClick={refresh} disabled={busy}><RefreshCw size={18} /></button></header>
-      {error && <div className="alert" role="alert">{error}</div>}{notice && <div className="notice" role="status">{notice}</div>}
+      {error && <div className="alert" role="alert">构建操作失败：{error}</div>}{listError}{notice && <div className="notice" role="status">{notice}</div>}
       <div className="summary"><div><small>可见任务</small><strong>{jobs.length}</strong></div><div><small>失败构建</small><strong>{jobs.filter((job) => buildStatus(job.build, job.color) === "失败").length}</strong></div><div><small>运行中</small><strong>{jobs.filter((job) => buildStatus(job.build, job.color) === "运行中").length}</strong></div></div>
       <div className="list-heading"><h2>任务</h2><div className="controls"><label><Search size={16} /><input aria-label="搜索任务" placeholder="搜索任务" value={query} onChange={(event) => setQuery(event.target.value)} /></label><select aria-label="按状态筛选" value={filter} onChange={(event) => setFilter(event.target.value)}><option>全部</option><option>失败</option><option>成功</option><option>运行中</option></select></div></div>
       {busy && <div className="loading">正在读取任务…</div>}

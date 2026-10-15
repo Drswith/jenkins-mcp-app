@@ -18,6 +18,8 @@ Use HTTPS for connections outside a trusted local network. The bridge sends HTTP
 
 The controller must permit the user to read the requested jobs. `triggerBuild` also requires the Jenkins permission to build the selected job. Jenkins enforces permissions; the bridge does not grant any.
 
+Local REST requests have a 30-second timeout per attempt. GET requests retry once only for recognized transient connection errors; HTTP errors and write requests are never automatically retried. Network diagnostics expose a known error code or a fixed timeout label, without including credentials, query strings or raw error details. An error after submitting a build therefore requires checking its queue before any manual resubmission.
+
 ## Modes
 
 **MCP mode** connects to `<JENKINS_URL>/mcp-server/mcp` using the Jenkins MCP Server plugin's [Streamable HTTP transport](https://plugins.jenkins.io/mcp-server/). It forwards the upstream schemas and results for these tools when Jenkins exposes them: `whoAmI`, `getStatus`, `getJobs`, `getJob`, `getBuild`, `getBuildLog`, `searchBuildLog`, `getTestResults`, `getQueueItem`, `getJobScm`, `getBuildScm`, `getBuildChangeSets`, `findJobsWithScmUrl`, `triggerBuild`. Other upstream tools, including replay and build metadata updates, are not exposed by this package. Jenkins plugin versions and permissions may change the visible list.

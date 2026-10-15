@@ -1,6 +1,6 @@
 {
   "name": "jenkins-codex-plugin",
-  "version": "0.1.7",
+  "version": "0.1.11",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@12.4.1",

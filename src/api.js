@@ -2,20 +2,62 @@ import { jobPath } from "./config.js";
 
 const jsonResult = (data) => ({ content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data });
 
+const retryableNetworkCodes = new Set([
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_SOCKET",
+  "ECONNRESET",
+  "EAI_AGAIN",
+  "ETIMEDOUT",
+  "ECONNREFUSED",
+]);
+
+function networkFailure(error) {
+  const pending = [error];
+  const seen = new Set();
+  let timedOut = false;
+  while (pending.length && seen.size < 4) {
+    const current = pending.shift();
+    if (!current || (typeof current !== "object" && typeof current !== "function") || seen.has(current)) continue;
+    seen.add(current);
+    if (current.name === "TimeoutError") timedOut = true;
+    if (retryableNetworkCodes.has(current.code)) return { code: current.code, timedOut };
+    if (current.cause) pending.push(current.cause);
+  }
+  return { code: null, timedOut };
+}
+
+function safeNetworkError(error) {
+  const { code, timedOut } = networkFailure(error);
+  if (code) return new Error(`Jenkins network request failed (${code})`);
+  if (timedOut) return new Error("Jenkins request timed out after 30 seconds");
+  return new Error("Jenkins network request failed; check connectivity to the controller");
+}
+
 export async function request(config, path, { method = "GET", body, contentType } = {}) {
   const url = new URL(path, config.baseUrl);
   if (url.origin !== config.baseUrl.origin || !url.pathname.startsWith(config.baseUrl.pathname)) throw new Error("Request escaped Jenkins root");
-  const response = await fetch(url, {
-    method,
-    headers: {
-      Authorization: config.authorization,
-      Accept: "application/json",
-      ...(contentType ? { "Content-Type": contentType } : {}),
-    },
-    body,
-    redirect: "manual",
-    signal: AbortSignal.timeout(30000),
-  });
+  let response;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      response = await fetch(url, {
+        method,
+        headers: {
+          Authorization: config.authorization,
+          Accept: "application/json",
+          ...(contentType ? { "Content-Type": contentType } : {}),
+        },
+        body,
+        redirect: "manual",
+        signal: AbortSignal.timeout(30000),
+      });
+      break;
+    } catch (error) {
+      const { code } = networkFailure(error);
+      if (method === "GET" && attempt === 0 && code) continue;
+      throw safeNetworkError(error);
+    }
+  }
   if (response.status >= 300 && response.status < 400 && !(method === "POST" && response.status === 201)) {
     throw new Error(`Jenkins redirected request (${response.status}); check the configured root URL`);
   }

@@ -17,6 +17,8 @@
 
 工作台和侧边栏可查看任务默认参数、Choice 选项、Boolean 默认值及按需读取的 Git 候选；参数面板保持只读，不能提交构建。没有历史的任务仍可查看参数。构建编号输入会读取指定历史记录；阶段信息同时覆盖运行中和已结束构建。不稳定、中止、失败和未构建分别显示，`NOT_EXECUTED` 在运行中表示待执行、结束后表示跳过，`PAUSED_PENDING_INPUT` 表示等待审批输入。
 
+任务列表读取错误与构建操作错误分别显示；任务列表失败不会覆盖已成功读取的构建和阶段，并提供“重试任务列表”。列表和详情均校验异步响应归属，避免较旧请求覆盖当前结果。网络错误诊断与重试边界见[连接配置](configuration.md#connection)。
+
 全局侧栏入口在 `tools/list` 中以 `Jenkins` 为标题，并提供浅色、深色主题的 Jenkins 官方构建锤子单色 SVG；对话侧边栏入口标题为 `Jenkins 构建`。插件清单中的 `logo` 和 `logoDark` 使用正方形彩色 Jenkins 头像，供插件市场展示；`composerIcon` 和 `composerIconDark` 使用小尺寸单色构建图标。入口工具仍单独声明 `title` 和 `icons`。
 
 工作台与侧边栏目前只读。用户主动点击“询问 ChatGPT”时，界面通过宿主桥接发送一条包含任务和构建号的提问；“打开 Jenkins”交由宿主打开构建 URL。内联卡片可选择任务、展开真实日志证据、刷新状态或发送针对构建的分析请求。卡片本身不会触发构建；模型只有在用户明确要求后才使用 `triggerBuild`，再以返回的队列 ID 打开追踪卡。卡片显示 Jenkins 事实，Codex 的分析在实际读取证据后由对话给出。
@@ -26,6 +28,16 @@
 排队卡只让当前“排队中”横条闪烁；运行中图标旋转。Pipeline 阶段同时列出完整名称及状态，避免多个阶段的横排文字被挤成省略号；卡片高度随内容报告给宿主。通用 Jenkins API 不提供可靠的完成百分比，阶段横条只表达各阶段状态。系统开启减少动态效果时，图标、横条和阶段动画保持静态。任务选择卡当前只涵盖顶层任务；更深的文件夹定位继续通过对话中的 `getJob` 完成。
 
 界面从 MCP Apps 宿主上下文读取浅色或深色主题，并响应运行时主题切换；宿主未提供主题时采用系统外观。`pnpm ui:preview` 的主题选择器会把同样的上下文发送给打包后的界面，供本地验证。
+
+## 自动展开
+
+从 0.1.10 起，`showJenkinsQueueCard` 默认在 MCP Apps 握手完成后请求一次 `fullscreen`，可传 `autoExpand: false` 保持内联。其他三种 `showJenkins*` 卡片可显式传 `autoExpand: true`。工具参数和结果均保留该选项；旧服务连接未返回该字段时，界面通过队列 ID 识别追踪卡。
+
+0.1.11 在卡片资源中声明 `preferredDisplayMode: "inline"`，并在 `App` 初始化能力中声明支持的显示模式。根据 [OpenAI 显示模式规范](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md#display-modes)，同时声明 inline/fullscreen 而省略初始偏好会默认全屏；初始偏好与之后的自动展开请求分别生效。工作台继续只支持全屏，侧栏入口由宿主决定。
+
+界面先检查宿主的 `availableDisplayModes`。已经全屏时不再请求；不支持、拒绝、超时（5 秒）或宿主返回其他模式时保留可用的内联内容，不重复展开，也不阻塞数据读取。用户关闭或收起后不会被自动展开请求再次打断。宿主决定最终显示方式；此能力无法从服务端重新打开已经释放的历史卡片。
+
+界面的 `data-ui-version`、`data-document-id`、`data-initial-display-mode`、`data-display-mode`、`data-auto-expand-from`、`data-auto-expand-state` 用于只读验收，请求及终态通过 `sendLog` 以 `jenkins-display-mode` 名称发送给宿主；不包含凭据或构建日志。`initial-display-mode` 是首次观察到的宿主模式，`auto-expand-from` 保留实际发起请求时的模式，不随后续宿主上下文改变。验收需分别检查展开请求结果、DOM/截图控制，以及同一文档的队列到构建状态更新。
 
 ## 当前运行边界
 
