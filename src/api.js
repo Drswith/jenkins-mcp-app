@@ -1,5 +1,7 @@
 import { jobPath } from "./config.js";
 
+export const triggerDescription = "安排一次构建，仅在用户明确要求时调用。可能部署或修改外部系统；重复调用会再排一次构建。参数化任务仅接受简单字符串、数字或布尔参数。";
+
 const jsonResult = (data) => ({ content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data });
 
 const retryableNetworkCodes = new Set([
@@ -254,7 +256,7 @@ export const apiTools = [
     call: async (config, args) => jsonResult(await getJson(config, `queue/item/${args.queueId}/api/json?tree=${encodeURIComponent("id,blocked,buildable,stuck,cancelled,why,task[name,fullName,url],executable[number,url]")}`)),
   },
   {
-    name: "triggerBuild", title: "触发 Jenkins 构建", description: "安排一次构建。参数化任务仅接受简单字符串、数字或布尔参数。",
+    name: "triggerBuild", title: "触发 Jenkins 构建", description: triggerDescription,
     inputSchema: { type: "object", properties: { jobFullName: { type: "string" }, parameters: { type: "object", additionalProperties: { type: ["string", "number", "boolean"] } } }, required: ["jobFullName"], additionalProperties: false }, readOnly: false,
     call: async (config, args) => {
       const parameters = args.parameters ?? {};
@@ -276,6 +278,6 @@ export const apiTools = [
 export function publicTool(tool) {
   return {
     name: tool.name, title: tool.title, description: tool.description, inputSchema: tool.inputSchema,
-    annotations: { readOnlyHint: tool.readOnly, destructiveHint: !tool.readOnly, openWorldHint: true },
+    annotations: { readOnlyHint: tool.readOnly, destructiveHint: !tool.readOnly, openWorldHint: false },
   };
 }

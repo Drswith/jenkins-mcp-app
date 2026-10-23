@@ -164,8 +164,7 @@ function Root() {
 
   useEffect(() => {
     if (mode !== "card") return;
-    // Queue cards also work with older server connections that omit autoExpand.
-    const requested = input.autoExpand ?? initial?.autoExpand ?? Number.isInteger(input.queueId ?? initial?.queueId);
+    const requested = input.autoExpand ?? initial?.autoExpand ?? false;
     expandRef.current.update({ ready, requested, context: hostContext });
   }, [ready, hostContext, input.autoExpand, input.queueId, initial?.autoExpand, initial?.queueId]);
 

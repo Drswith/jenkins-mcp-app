@@ -5,9 +5,10 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { CallToolRequestSchema, ListToolsRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { apiTools, publicTool } from "./api.js";
+import { apiTools, publicTool, triggerDescription } from "./api.js";
 import { readConfig } from "./config.js";
 import { callUiTool, readUiResource, uiIcons, uiResources, uiTools } from "./ui.js";
+import { sanitizeToolResult } from "./sanitize.js";
 
 const pluginVersion = JSON.parse(readFileSync(new URL("../plugin.json", import.meta.url), "utf8")).version;
 
@@ -37,6 +38,15 @@ function validateApiArguments(tool, args) {
       }
     }
   }
+}
+
+// Upstream tools accept an arbitrary `tree` selector, which would let the model
+// request any Jenkins field. Keep each tool's reviewed default field set instead.
+function withoutTreeSelector(tool) {
+  const schema = tool.inputSchema;
+  if (!schema?.properties || !("tree" in schema.properties)) return tool;
+  const { tree, ...properties } = schema.properties;
+  return { ...tool, inputSchema: { ...schema, properties, ...(Array.isArray(schema.required) ? { required: schema.required.filter((key) => key !== "tree") } : {}) } };
 }
 
 function upstreamUrl(config) {
@@ -72,19 +82,25 @@ export function createBridge(env = process.env) {
     if (config.mode === "api") return { tools: [...apiTools.map(publicTool), ...uiTools] };
     const result = await (await upstream()).listTools();
     return {
-      tools: [...result.tools.filter((tool) => allowed.has(tool.name)).map((tool) => ({
+      tools: [...result.tools.filter((tool) => allowed.has(tool.name)).map(withoutTreeSelector).map((tool) => ({
         ...tool,
+        ...(tool.name === "triggerBuild" ? { description: triggerDescription } : {}),
         annotations: {
           ...tool.annotations,
           readOnlyHint: tool.name !== "triggerBuild",
           destructiveHint: tool.name === "triggerBuild",
-          openWorldHint: true,
+          openWorldHint: false,
         },
       })), ...apiTools.filter((tool) => localApiToolNames.has(tool.name)).map(publicTool), ...uiTools],
     };
   });
 
   server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
+    const appOnly = uiTools.some((entry) => entry.name === params.name && entry._meta?.ui?.visibility?.includes("app") && !entry._meta.ui.visibility.includes("model"));
+    return sanitizeToolResult(params.name, await callTool(params), { appOnly });
+  });
+
+  async function callTool(params) {
     try {
       const uiTool = uiTools.find((entry) => entry.name === params.name);
       if (uiTool) {
@@ -106,11 +122,12 @@ export function createBridge(env = process.env) {
         return await tool.call(config, args);
       }
       if (!allowed.has(params.name)) throw new Error("Tool is not exposed by this plugin");
-      return await (await upstream()).callTool({ name: params.name, arguments: params.arguments ?? {} });
+      const { tree, ...upstreamArgs } = params.arguments ?? {};
+      return await (await upstream()).callTool({ name: params.name, arguments: upstreamArgs });
     } catch (error) {
       return { isError: true, content: [{ type: "text", text: error instanceof Error ? error.message : "Jenkins request failed" }] };
     }
-  });
+  }
 
   return { server, config, upstreamUrl: upstreamUrl(config) };
 }

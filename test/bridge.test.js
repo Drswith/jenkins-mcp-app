@@ -40,6 +40,7 @@ test("installable plugin contains only runtime files", () => {
     "docs/configuration.md", "mcp.json", "plugin.json",
     "skills/jenkins-build-triage/SKILL.md", "skills/jenkins-setup/SKILL.md",
     "skills/jenkins-trigger-build/SKILL.md",
+    ...["jenkins-build-triage", "jenkins-setup", "jenkins-trigger-build"].map((name) => `skills/${name}/agents/openai.yaml`),
   ].sort());
 });
 
@@ -188,6 +189,12 @@ test("stdio MCP bridge reads and schedules through Jenkins API", async () => {
     const tools = await client.listTools();
     assert.deepEqual(tools.tools.map((tool) => tool.name), [...apiToolNames, ...uiToolNames]);
     assert.equal(tools.tools.find((tool) => tool.name === "triggerBuild").annotations.readOnlyHint, false);
+    for (const tool of tools.tools) {
+      assert.equal(tool.annotations.openWorldHint, false);
+      assert.equal(typeof tool.annotations.readOnlyHint, "boolean");
+      assert.equal(typeof tool.annotations.destructiveHint, "boolean");
+    }
+    assert.match(tools.tools.find((tool) => tool.name === "triggerBuild").description, /重复调用/);
     const workspaceTool = tools.tools.find((tool) => tool.name === "openJenkinsWorkspace");
     assert.equal(workspaceTool.title, "Jenkins");
     assert.equal(workspaceTool.description, "打开 Jenkins 工作台");
@@ -226,7 +233,7 @@ test("stdio MCP bridge reads and schedules through Jenkins API", async () => {
     assert.equal(expandedBuildCard.structuredContent.autoExpand, true);
     const queueCard = await client.callTool({ name: "showJenkinsQueueCard", arguments: { jobFullName: "folder/build main", queueId: 7 } });
     assert.equal(queueCard.structuredContent.queue.why, "等待空闲执行器");
-    assert.equal(queueCard.structuredContent.autoExpand, true);
+    assert.equal(queueCard.structuredContent.autoExpand, false);
     const inlineQueueCard = await client.callTool({ name: "showJenkinsQueueCard", arguments: { jobFullName: "folder/build main", queueId: 7, autoExpand: false } });
     assert.equal(inlineQueueCard.structuredContent.autoExpand, false);
     const invalidExpand = await client.callTool({ name: "showJenkinsQueueCard", arguments: { jobFullName: "folder/build main", queueId: 7, autoExpand: "true" } });
@@ -251,7 +258,7 @@ test("stdio MCP bridge reads and schedules through Jenkins API", async () => {
     assert.equal(forbiddenStages.reason, "permission_denied");
     const expiredQueue = await client.callTool({ name: "showJenkinsQueueCard", arguments: { jobFullName: "folder/build main", queueId: 8 } });
     assert.equal(expiredQueue.structuredContent.build.number, 42);
-    assert.equal(expiredQueue.structuredContent.autoExpand, true);
+    assert.equal(expiredQueue.structuredContent.autoExpand, false);
     const unmatchedExpiredQueue = await client.callTool({ name: "showJenkinsQueueCard", arguments: { jobFullName: "folder/build main", queueId: 99 } });
     assert.equal(unmatchedExpiredQueue.structuredContent.reason, "expired");
     assert.equal(unmatchedExpiredQueue.structuredContent.build, undefined);
@@ -277,9 +284,19 @@ test("MCP mode forwards allowed Jenkins tools and hides replay tools", async () 
   const upstream = new Server({ name: "fixture-jenkins", version: "0.1.0" }, { capabilities: { tools: {} } });
   upstream.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
     { name: "getStatus", description: "Read health", inputSchema: { type: "object", properties: {} } },
+    { name: "getJobs", description: "List jobs", inputSchema: { type: "object", properties: { limit: { type: "integer" }, tree: { type: "string" } }, required: ["tree"] } },
+    { name: "triggerBuild", description: "Unsafe upstream description", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } },
     { name: "replayBuild", description: "Change script", inputSchema: { type: "object", properties: {} } },
   ] }));
-  upstream.setRequestHandler(CallToolRequestSchema, async ({ params }) => ({ content: [{ type: "text", text: params.name }] }));
+  const upstreamArgs = [];
+  upstream.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
+    upstreamArgs.push(params.arguments);
+    if (params.name !== "getJobs") return { content: [{ type: "text", text: params.name }] };
+    return { content: [{ type: "text", text: JSON.stringify({ message: "Data retrieved successfully.", status: "COMPLETED", result: [
+      { _class: "com.cloudbees.hudson.plugins.folder.Folder", name: "folder" },
+      { _class: "hudson.model.FreeStyleProject", name: "job", color: "red_anime", description: "https://bot:hunter2@git.example.com/r.git", lastBuild: { number: 4, queueId: 9 } },
+    ] }) }] };
+  });
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: randomUUID });
   await upstream.connect(transport);
   const httpServer = createServer(async (req, res) => {
@@ -308,8 +325,20 @@ test("MCP mode forwards allowed Jenkins tools and hides replay tools", async () 
       },
     }));
     const tools = await client.listTools();
-    assert.deepEqual(tools.tools.map((tool) => tool.name), ["getStatus", "getJobParameters", "getGitParameterChoices", ...uiToolNames]);
+    assert.deepEqual(tools.tools.map((tool) => tool.name), ["getStatus", "getJobs", "triggerBuild", "getJobParameters", "getGitParameterChoices", ...uiToolNames]);
+    const trigger = tools.tools.find((tool) => tool.name === "triggerBuild");
+    assert.deepEqual(trigger.annotations, { readOnlyHint: false, destructiveHint: true, openWorldHint: false });
+    assert.match(trigger.description, /仅在用户明确要求.*重复调用/);
+    const getJobsTool = tools.tools.find((tool) => tool.name === "getJobs");
+    assert.deepEqual(Object.keys(getJobsTool.inputSchema.properties), ["limit"]);
+    assert.deepEqual(getJobsTool.inputSchema.required, []);
     assert.equal((await client.callTool({ name: "getStatus", arguments: {} })).content[0].text, "getStatus");
+    const jobs = JSON.parse((await client.callTool({ name: "getJobs", arguments: { limit: 5, tree: "jobs[*]" } })).content[0].text);
+    assert.deepEqual(upstreamArgs.at(-1), { limit: 5 });
+    assert.deepEqual(jobs, [
+      { type: "folder", name: "folder" },
+      { name: "job", status: "failure", building: true, description: "https://bot:****@git.example.com/r.git", lastBuild: { number: 4 } },
+    ]);
     assert.equal((await client.callTool({ name: "uiListJobs", arguments: {} })).structuredContent.jobs[0].name, "from-api");
     assert.equal((await client.callTool({ name: "replayBuild", arguments: {} })).isError, true);
   } finally {

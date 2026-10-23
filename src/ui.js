@@ -36,7 +36,7 @@ function tool(name, description, schema, { title = description, view, entrypoint
   return {
     name, title, description, inputSchema: schema,
     ...(entrypoint ? { icons: uiIcons } : {}),
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     _meta,
   };
 }
@@ -45,7 +45,7 @@ export const uiTools = [
   tool("openJenkinsWorkspace", "打开 Jenkins 工作台", inputSchema.empty, { title: "Jenkins", view: "workspace", entrypoint: "global" }),
   tool("openJenkinsPanel", "在对话侧边栏查看 Jenkins 构建", inputSchema.optionalBuild, { title: "Jenkins 构建", view: "panel", entrypoint: "thread" }),
   tool("showJenkinsBuildCard", "在对话中显示 Jenkins 构建状态卡片；运行中可持续刷新，失败时可查看日志证据", cardSchema(inputSchema.build), { view: "card" }),
-  tool("showJenkinsQueueCard", "追踪已提交的 Jenkins 队列项，默认请求自动展开；在 triggerBuild 返回队列 ID 后调用", cardSchema(inputSchema.queue, true), { view: "card" }),
+  tool("showJenkinsQueueCard", "追踪已提交的 Jenkins 队列项，默认保持内联；在 triggerBuild 返回队列 ID 后调用", cardSchema(inputSchema.queue), { view: "card" }),
   tool("showJenkinsJobChoices", "在对话中显示可选择的 Jenkins 任务", cardSchema(inputSchema.choices), { view: "card" }),
   tool("showJenkinsBuildComparison", "在对话中比较同一 Jenkins 任务的两次构建", cardSchema(inputSchema.comparison), { view: "card" }),
   tool("uiListJobs", "读取工作台任务列表", inputSchema.empty, { appOnly: true }),
@@ -85,7 +85,7 @@ export function readUiResource(uri, config) {
 }
 
 export async function callUiTool(config, name, args) {
-  const cardResponse = (value) => response({ ...value, ...(name.startsWith("showJenkins") ? { autoExpand: args.autoExpand ?? name === "showJenkinsQueueCard" } : {}) });
+  const cardResponse = (value) => response({ ...value, ...(name.startsWith("showJenkins") ? { autoExpand: args.autoExpand ?? false } : {}) });
   if (name === "openJenkinsWorkspace") return response({ view: "workspace" });
   if (name === "openJenkinsPanel") return response({ view: "panel", ...args });
   if (name === "showJenkinsBuildCard") {
