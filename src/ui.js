@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { apiTools, normalizeJenkinsUrl, request } from "./api.js";
+import { logEvidence, prepareParameters, changesSinceSuccess } from "./evidence.js";
 import { jobPath } from "./config.js";
 
 const manifest = JSON.parse(readFileSync(new URL("./ui/manifest.json", import.meta.url), "utf8"));
@@ -21,6 +22,7 @@ const inputSchema = {
   queue: { type: "object", properties: { jobFullName: { type: "string" }, queueId: { type: "integer", minimum: 1 } }, required: ["jobFullName", "queueId"], additionalProperties: false },
   choices: { type: "object", properties: { filter: { type: "string", enum: ["all", "failed", "running"] } }, additionalProperties: false },
   comparison: { type: "object", properties: { jobFullName: { type: "string" }, beforeBuildNumber: { type: "integer", minimum: 1 }, afterBuildNumber: { type: "integer", minimum: 1 } }, required: ["jobFullName", "beforeBuildNumber", "afterBuildNumber"], additionalProperties: false },
+  confirmation: { type: "object", properties: { jobFullName: { type: "string" }, parameters: { type: "object", additionalProperties: { type: ["string", "number", "boolean"] } } }, required: ["jobFullName"], additionalProperties: false },
   optionalBuild: { type: "object", properties: { jobFullName: { type: "string" }, buildNumber: { type: "integer", minimum: 1 } }, additionalProperties: false },
   parameterJob: { type: "object", properties: { jobFullName: { type: "string" } }, required: ["jobFullName"], additionalProperties: false },
   gitChoices: { type: "object", properties: { jobFullName: { type: "string" }, parameterName: { type: "string" } }, required: ["jobFullName", "parameterName"], additionalProperties: false },
@@ -44,6 +46,8 @@ function tool(name, description, schema, { title = description, view, entrypoint
 export const uiTools = [
   tool("openJenkinsWorkspace", "打开 Jenkins 工作台", inputSchema.empty, { title: "Jenkins", view: "workspace", entrypoint: "global" }),
   tool("openJenkinsPanel", "在对话侧边栏查看 Jenkins 构建", inputSchema.optionalBuild, { title: "Jenkins 构建", view: "panel", entrypoint: "thread" }),
+  tool("showJenkinsTriggerConfirmation", "准备触发确认卡，展示全部参数及默认值差异；只预览，不提交构建", cardSchema(inputSchema.confirmation), { view: "card" }),
+  tool("uiGetBuildEvidence", "读取指定构建的阶段、日志片段及相对上次成功的变更", inputSchema.build, { appOnly: true }),
   tool("showJenkinsBuildCard", "在对话中显示 Jenkins 构建状态卡片；运行中可持续刷新，失败时可查看日志证据", cardSchema(inputSchema.build), { view: "card" }),
   tool("showJenkinsQueueCard", "追踪已提交的 Jenkins 队列项，默认保持内联；在 triggerBuild 返回队列 ID 后调用", cardSchema(inputSchema.queue), { view: "card" }),
   tool("showJenkinsJobChoices", "在对话中显示可选择的 Jenkins 任务", cardSchema(inputSchema.choices), { view: "card" }),
@@ -85,9 +89,37 @@ export function readUiResource(uri, config) {
 }
 
 export async function callUiTool(config, name, args) {
-  const cardResponse = (value) => response({ ...value, ...(name.startsWith("showJenkins") ? { autoExpand: args.autoExpand ?? false } : {}) });
+  const cardResponse = (value) => {
+    if (!name.startsWith("showJenkins")) return response(value);
+    const buildFact = (build) => build && Object.fromEntries(["number", "result", "building", "duration", "timestamp", "url"].filter((key) => build[key] !== undefined).map((key) => [key, build[key]]));
+    const facts = { ...(value.jobFullName ? { jobFullName: value.jobFullName } : {}) };
+    if (value.build) facts.build = buildFact(value.build);
+    if (value.queue) Object.assign(facts, { queueId: value.queueId, cancelled: Boolean(value.queue.cancelled), expired: Boolean(value.queue.expired), why: value.queue.why ?? null });
+    if (value.jobs) facts.jobs = value.jobs.map((job) => ({ fullName: job.fullName || job.name, build: buildFact(job.lastBuild) }));
+    if (value.before) Object.assign(facts, { before: buildFact(value.before), after: buildFact(value.after) });
+    if (value.parameters) Object.assign(facts, { confirmationRequired: true, parameters: Object.fromEntries(value.parameters.filter((item) => !item.blocked).map((item) => [item.name, item.value])), blocked: value.parameters.some((item) => item.blocked) });
+    return { ...response(facts), _meta: { card: { ...value, autoExpand: args.autoExpand ?? false } } };
+  };
   if (name === "openJenkinsWorkspace") return response({ view: "workspace" });
   if (name === "openJenkinsPanel") return response({ view: "panel", ...args });
+  if (name === "showJenkinsTriggerConfirmation") {
+    const result = await apiByName.get("getJobParameters").call(config, args);
+    return cardResponse({ view: "confirmation", jobFullName: args.jobFullName, parameters: prepareParameters(result.structuredContent.parameters, args.parameters) });
+  }
+  if (name === "uiGetBuildEvidence") {
+    const build = (await apiByName.get("getBuild").call(config, args)).structuredContent;
+    const exact = { jobFullName: args.jobFullName, buildNumber: build.number };
+    const [stages, log, changes] = await Promise.allSettled([
+      callUiTool(config, "uiGetBuildStages", exact),
+      apiByName.get("getBuildLog").call(config, exact),
+      request(config, `${jobPath(args.jobFullName)}/api/json?tree=${encodeURIComponent("builds[number,result,building,changeSet[items[commitId,msg,author[fullName]]],changeSets[items[commitId,msg,author[fullName]]]]{0,50}")}`).then((result) => result.json()).then((result) => changesSinceSuccess(result.builds ?? [], build.number)),
+    ]);
+    return response({ jobFullName: args.jobFullName, build,
+      stages: stages.status === "fulfilled" ? stages.value.structuredContent : { available: false, reason: "request_failed", message: stages.reason.message },
+      log: log.status === "fulfilled" ? { ...logEvidence(log.value.structuredContent.log), truncated: Boolean(log.value.structuredContent.truncated) } : { lines: [], error: log.reason.message },
+      changes: changes.status === "fulfilled" ? changes.value : { available: false, reason: changes.reason.message, commits: [] },
+    });
+  }
   if (name === "showJenkinsBuildCard") {
     const build = await apiByName.get("getBuild").call(config, args);
     return cardResponse({ view: "card", jobFullName: args.jobFullName, build: build.structuredContent });
@@ -141,7 +173,7 @@ export async function callUiTool(config, name, args) {
     try {
       const result = await request(config, `${jobPath(args.jobFullName)}/${args.buildNumber ?? "lastBuild"}/wfapi/describe`);
       const data = await result.json();
-      return response({ available: true, stages: Array.isArray(data.stages) ? data.stages.map(({ name, status }) => ({ name, status })) : [] });
+      return response({ available: true, stages: Array.isArray(data.stages) ? data.stages.map(({ id, name, status, durationMillis, startTimeMillis }) => ({ id, name, status, durationMillis, startTimeMillis })) : [] });
     } catch (error) {
       if (/HTTP 403/.test(String(error))) return response({ available: false, stages: [], reason: "permission_denied" });
       if (/HTTP 404/.test(String(error))) return response({ available: false, stages: [], reason: "not_found" });

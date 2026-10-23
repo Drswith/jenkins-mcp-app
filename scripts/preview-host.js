@@ -27,7 +27,7 @@ function scenarioBuild() {
   if (["running", "running-no-stages", "queue"].includes(scenario)) {
     buildReads += 1;
     const completed = scenario === "queue" && buildReads >= 3;
-    return { number: 285, result: completed ? "SUCCESS" : null, building: !completed, timestamp: Date.now() - 134000, duration: completed ? 188000 : 0, url: "https://jenkins.example.com/job/checkout-api/285/" };
+    return { number: 285, result: completed ? "SUCCESS" : null, building: !completed, timestamp: Date.now() - 134000, previousBuild: { number: 284, duration: 252000 }, duration: completed ? 188000 : 0, url: "https://jenkins.example.com/job/checkout-api/285/" };
   }
   return scenario === "success" ? { number: 285, result: "SUCCESS", building: false, timestamp: Date.now() - 350000, duration: 188000, url: "https://jenkins.example.com/job/checkout-api/285/" } : buildFor(jobs[0].fullName);
 }
@@ -36,7 +36,7 @@ function reply(data) {
   return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
 }
 
-const bridge = new AppBridge(null, { name: "Jenkins UI preview", version: "0.1.0" }, { serverTools: {}, openLinks: {}, message: { text: {} } }, { hostContext: { theme: initialTheme } });
+const bridge = new AppBridge(null, { name: "Jenkins UI preview", version: "0.1.0" }, { serverTools: {}, openLinks: {}, message: { text: {} }, updateModelContext: { text: {} }, experimental: { "openai/message": {}, "openai/modelContext": {} } }, { hostContext: { theme: initialTheme, platform: "desktop", displayMode: "inline", availableDisplayModes: ["inline", "fullscreen"] } });
 const themeSelect = document.querySelector("#theme");
 themeSelect.value = initialTheme;
 function setPreviewTheme(theme) {
@@ -57,6 +57,7 @@ bridge.oncalltool = async ({ name, arguments: args }) => {
     const response = await fetch("/tool", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, arguments: args ?? {} }) });
     return response.json();
   }
+  if (name === "uiGetBuildEvidence") return reply({ build: scenarioBuild(), stages: { available: true, stages: [{name:"检出",status:"SUCCESS",durationMillis:6000},{name:"构建",status:"SUCCESS",durationMillis:70000},{name:"部署",status:"FAILED",durationMillis:42000}] }, log: { lines: [{number:109,text:"Readiness probe: GET /healthz → 404"},{number:110,text:"ERROR: Readiness probe failed"},{number:111,text:"ERROR: pod checkout-api not ready"}], readLines: 1204, truncated: false }, changes: { available:true,baselineBuildNumber:283,commits:[{commitId:"9f3c2ab",msg:"health: move readiness to /health",author:"Alex"}] } });
   if (name === "uiListJobs") return reply({ jobs });
   if (name === "uiGetJob") return reply({ jobs, lastBuild: buildFor(args.jobFullName) });
   if (name === "uiGetJobParameters") return reply({ jobFullName: args.jobFullName, parameters: [
@@ -68,7 +69,7 @@ bridge.oncalltool = async ({ name, arguments: args }) => {
   if (name === "uiGetBuildStages") {
     if (scenario === "running-no-stages") return reply({ available: false, stages: [] });
     const current = buildReads >= 2 ? 2 : 1;
-    return reply({ available: true, stages: ["检出", "构建", "测试", "部署"].map((name, index) => ({ name, status: index < current ? "SUCCESS" : index === current ? "IN_PROGRESS" : "NOT_EXECUTED" })) });
+    return reply({ available: true, stages: ["检出", "构建", "测试", "部署"].map((name, index) => ({ name, status: scenario === "success" ? "SUCCESS" : scenario === "failed" ? index < 3 ? "SUCCESS" : "FAILED" : index < current ? "SUCCESS" : index === current ? "IN_PROGRESS" : "NOT_EXECUTED" })) });
   }
   if (name === "uiGetQueueItem") return reply({ id: 71, why: queueReads++ ? null : "等待空闲执行器", task: { fullName: jobs[0].fullName }, ...(queueReads >= 2 ? { executable: { number: 285 } } : {}) });
   if (name === "uiTrackQueue") {
@@ -78,9 +79,10 @@ bridge.oncalltool = async ({ name, arguments: args }) => {
   if (name === "uiGetBuildLog") return reply({ log: "[INFO] Deploying to staging...\n[ERROR] Readiness probe failed\nFinished: FAILURE" });
   return { isError: true, content: [{ type: "text", text: "未知工具" }] };
 };
+bridge.onupdatemodelcontext = async ({ content }) => { document.querySelector("#message").textContent = content?.[0]?.text || "附件已移除"; bridge.setHostContext({ "openai/modelContext": content.length ? { updateId: crypto.randomUUID(), content } : null }); return {}; };
 bridge.onmessage = async ({ content }) => { document.querySelector("#message").textContent = content?.[0]?.text || ""; return {}; };
 bridge.onopenlink = async ({ url }) => { document.querySelector("#message").textContent = `将打开：${url}`; return {}; };
-bridge.onrequestdisplaymode = async ({ mode: next }) => { iframe.classList.toggle("expanded", next === "fullscreen"); return { mode: next }; };
+bridge.onrequestdisplaymode = async ({ mode: next }) => { iframe.classList.toggle("expanded", next === "fullscreen"); bridge.setHostContext({displayMode: next}); return { mode: next }; };
 bridge.onsizechange = ({height}) => {
   if(mode==='card'&&Number.isFinite(height)&&height>0)iframe.style.height=`${Math.ceil(height)}px`;
 };
@@ -96,7 +98,7 @@ bridge.oninitialized = async () => {
   const buildNumber=Number.isInteger(requestedBuild)&&requestedBuild>0?requestedBuild:selected?.lastBuild?.number;
   const args = mode === "workspace" || !selected ? {} : { jobFullName: selected.fullName, ...(buildNumber ? { buildNumber } : {}) };
   await bridge.sendToolInput({ arguments: args });
-  const mockCard = scenario === "queue" ? { view: "queue", jobFullName: jobs[0].fullName, queueId: 71, queue: { id: 71, why: "等待空闲执行器", task: { fullName: jobs[0].fullName } } }
+  const mockCard = scenario === "confirmation" ? {view:"confirmation",jobFullName:"infra/deploy-staging",parameters:[{name:"BRANCH",type:"string",defaultValue:"main",value:"release/2.4"},{name:"REGION",type:"choice",choices:["ap-southeast-1","eu-west-1"],defaultValue:"ap-southeast-1",value:"ap-southeast-1"},{name:"DRY_RUN",type:"boolean",defaultValue:true,value:false}]} : scenario === "queue" ? { view: "queue", jobFullName: jobs[0].fullName, queueId: 71, queue: { id: 71, why: "等待空闲执行器", task: { fullName: jobs[0].fullName } } }
     : scenario === "choices" ? { view: "choices", filter: "all", jobs }
       : scenario === "comparison" ? { view: "comparison", jobFullName: jobs[0].fullName, before: { number: 283, result: "SUCCESS", duration: 170000 }, after: buildFor(jobs[0].fullName) }
         : { view: "card", jobFullName: jobs[0].fullName, build: scenarioBuild() };

@@ -19,7 +19,7 @@ const installedCopy = join(testRoot, "jenkins");
 cpSync(join(process.cwd(), "release/jenkins"), installedCopy, { recursive: true });
 const bundledServer = join(installedCopy, "dist/server.mjs");
 const uiManifest = JSON.parse(readFileSync(join(installedCopy, "dist/ui/manifest.json"), "utf8"));
-const uiToolNames = ["openJenkinsWorkspace", "openJenkinsPanel", "showJenkinsBuildCard", "showJenkinsQueueCard", "showJenkinsJobChoices", "showJenkinsBuildComparison", "uiListJobs", "uiGetJob", "uiGetBuild", "uiGetBuildLog", "uiGetQueueItem", "uiTrackQueue", "uiGetBuildStages", "uiGetJobParameters", "uiGetGitParameterChoices"];
+const uiToolNames = ["openJenkinsWorkspace", "openJenkinsPanel", "showJenkinsTriggerConfirmation", "uiGetBuildEvidence", "showJenkinsBuildCard", "showJenkinsQueueCard", "showJenkinsJobChoices", "showJenkinsBuildComparison", "uiListJobs", "uiGetJob", "uiGetBuild", "uiGetBuildLog", "uiGetQueueItem", "uiTrackQueue", "uiGetBuildStages", "uiGetJobParameters", "uiGetGitParameterChoices"];
 const apiToolNames = ["getJobs", "getJob", "getJobParameters", "getGitParameterChoices", "getBuild", "getBuildLog", "getQueueItem", "triggerBuild"];
 after(() => rmSync(testRoot, { recursive: true, force: true }));
 
@@ -137,6 +137,11 @@ test("stdio MCP bridge reads and schedules through Jenkins API", async () => {
     } else if (req.url.startsWith("/jenkins/job/folder/job/build%20main/42/api/json")) {
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ number: 42, result: "FAILURE", duration: 140000 }));
+    } else if (req.url === "/jenkins/job/folder/job/build%20main/42/consoleText") {
+      res.end("intro\n\nERROR DB_PASSWORD=hunter22\nend");
+    } else if (req.url.startsWith("/jenkins/job/folder/job/build%20main/api/json?tree=") && decodeURIComponent(req.url).includes("builds[number,result")) {
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({builds:[{number:42,result:"FAILURE",changeSet:{items:[{commitId:"abc",msg:"fix",author:{fullName:"Ada"}}]}},{number:41,result:"SUCCESS"}]}));
     } else if (req.url === "/jenkins/job/folder/job/build%20main/42/wfapi/describe") {
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ stages: [{ name: "检出", status: "SUCCESS" }, { name: "测试", status: "FAILED" }] }));
@@ -227,15 +232,29 @@ test("stdio MCP bridge reads and schedules through Jenkins API", async () => {
     const build = await client.callTool({ name: "getBuild", arguments: { jobFullName: "folder/build main", buildNumber: 42 } });
     assert.equal(build.structuredContent.result, "FAILURE");
     const card = await client.callTool({ name: "showJenkinsBuildCard", arguments: { jobFullName: "folder/build main", buildNumber: 42 } });
+    assert.equal(card._meta.card.build.number, 42);
+    assert.equal(card._meta.card.autoExpand, false);
+    assert.equal(card.structuredContent.view, undefined);
+    assert.equal(card.structuredContent.autoExpand, undefined);
     assert.equal(card.structuredContent.build.number, 42);
-    assert.equal(card.structuredContent.autoExpand, false);
+    const confirmation = await client.callTool({ name: "showJenkinsTriggerConfirmation", arguments: { jobFullName: "folder/build main", parameters: { BRANCH: "release" } } });
+    assert.equal(confirmation._meta.card.parameters[0].changed, true);
+    assert.equal(confirmation.structuredContent.parameters.BRANCH, "release");
+    assert.equal(confirmation.structuredContent.confirmationRequired, true);
+    assert.equal(confirmation.structuredContent.view, undefined);
+    assert.equal((await client.callTool({ name: "showJenkinsTriggerConfirmation", arguments: { jobFullName: "folder/build main", parameters: { UNDECLARED: "x" } } })).isError, true);
+    assert.equal(calls.filter((call) => call.method === "POST").length, 0, "confirmation must never schedule work");
+    const evidence = await client.callTool({name:"uiGetBuildEvidence",arguments:{jobFullName:"folder/build main",buildNumber:42}});
+    assert.equal(evidence.structuredContent.changes.baselineBuildNumber,41);
+    assert.equal(evidence.structuredContent.log.lines[1].number,3);
+    assert.ok(!JSON.stringify(evidence).includes("hunter22"));
     const expandedBuildCard = await client.callTool({ name: "showJenkinsBuildCard", arguments: { jobFullName: "folder/build main", buildNumber: 42, autoExpand: true } });
-    assert.equal(expandedBuildCard.structuredContent.autoExpand, true);
+    assert.equal(expandedBuildCard._meta.card.autoExpand, true);
     const queueCard = await client.callTool({ name: "showJenkinsQueueCard", arguments: { jobFullName: "folder/build main", queueId: 7 } });
-    assert.equal(queueCard.structuredContent.queue.why, "等待空闲执行器");
-    assert.equal(queueCard.structuredContent.autoExpand, false);
+    assert.equal(queueCard._meta.card.queue.why, "等待空闲执行器");
+    assert.equal(queueCard._meta.card.autoExpand, false);
     const inlineQueueCard = await client.callTool({ name: "showJenkinsQueueCard", arguments: { jobFullName: "folder/build main", queueId: 7, autoExpand: false } });
-    assert.equal(inlineQueueCard.structuredContent.autoExpand, false);
+    assert.equal(inlineQueueCard._meta.card.autoExpand, false);
     const invalidExpand = await client.callTool({ name: "showJenkinsQueueCard", arguments: { jobFullName: "folder/build main", queueId: 7, autoExpand: "true" } });
     assert.equal(invalidExpand.isError, true);
     assert.match(invalidExpand.content[0].text, /autoExpand must be a boolean/);
@@ -257,17 +276,17 @@ test("stdio MCP bridge reads and schedules through Jenkins API", async () => {
     assert.equal(forbiddenStages.available, false);
     assert.equal(forbiddenStages.reason, "permission_denied");
     const expiredQueue = await client.callTool({ name: "showJenkinsQueueCard", arguments: { jobFullName: "folder/build main", queueId: 8 } });
-    assert.equal(expiredQueue.structuredContent.build.number, 42);
-    assert.equal(expiredQueue.structuredContent.autoExpand, false);
+    assert.equal(expiredQueue._meta.card.build.number, 42);
+    assert.equal(expiredQueue._meta.card.autoExpand, false);
     const unmatchedExpiredQueue = await client.callTool({ name: "showJenkinsQueueCard", arguments: { jobFullName: "folder/build main", queueId: 99 } });
-    assert.equal(unmatchedExpiredQueue.structuredContent.reason, "expired");
-    assert.equal(unmatchedExpiredQueue.structuredContent.build, undefined);
+    assert.equal(unmatchedExpiredQueue._meta.card.reason, "expired");
+    assert.equal(unmatchedExpiredQueue._meta.card.build, undefined);
     const wrongQueue = await client.callTool({ name: "showJenkinsQueueCard", arguments: { jobFullName: "another-job", queueId: 7 } });
     assert.equal(wrongQueue.isError, true);
     const choices = await client.callTool({ name: "showJenkinsJobChoices", arguments: {} });
-    assert.equal(choices.structuredContent.jobs[0].name, "folder");
+    assert.equal(choices._meta.card.jobs[0].name, "folder");
     const comparison = await client.callTool({ name: "showJenkinsBuildComparison", arguments: { jobFullName: "folder/build main", beforeBuildNumber: 41, afterBuildNumber: 42 } });
-    assert.deepEqual([comparison.structuredContent.before.result, comparison.structuredContent.after.result], ["SUCCESS", "FAILURE"]);
+    assert.deepEqual([comparison._meta.card.before.result, comparison._meta.card.after.result], ["SUCCESS", "FAILURE"]);
     assert.equal((await client.callTool({ name: "openJenkinsWorkspace", arguments: {} })).structuredContent.view, "workspace");
     const rejected = await client.callTool({ name: "triggerBuild", arguments: { jobFullName: "folder/build main", parameters: { SECRET: { nested: true } } } });
     assert.equal(rejected.isError, true);

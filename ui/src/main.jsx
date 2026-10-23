@@ -30,6 +30,7 @@ function applyHostTheme({ theme, styles } = {}) {
 
 function resultData(result) {
   if (result?.isError) throw new Error(result.content?.find((item) => item.type === "text")?.text || "Jenkins 请求失败");
+  if (result?._meta?.card) return result._meta.card;
   if (result?.structuredContent) return result.structuredContent;
   const text = result?.content?.find((item) => item.type === "text")?.text;
   if (!text) return {};
@@ -277,7 +278,7 @@ function Root() {
   }, [jobs, selected]);
 
   const visible = useMemo(() => jobs.filter((job) => job.name.toLowerCase().includes(query.toLowerCase()) && (filter === "全部" || buildStatus(job.build, job.color) === filter)), [jobs, query, filter]);
-  if (mode === "card") return <InlineCard ready={ready} initial={initial} input={input} hostError={error} call={call} bridge={bridge} />;
+  if (mode === "card") return <InlineCard ready={ready} initial={initial} input={input} hostError={error} call={call} bridge={bridge} hostContext={hostContext} />;
 
   const detail = <section className="detail" aria-label="构建详情">
     <header className="detail-header"><img src={jenkinsHeadshot} alt="" /><strong>Jenkins</strong></header>
