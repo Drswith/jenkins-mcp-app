@@ -1,11 +1,19 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUpRight, CheckCircle2, CircleAlert, Clock3, ExternalLink, LoaderCircle, RefreshCw, Sparkles } from "lucide-react";
+import { StatusIcon, statusLabel, buildStatus } from "./status.jsx";
 import "./inline.css";
 
 function statusOf(build, color) {
   if (build?.building || String(color ?? "").endsWith("_anime")) return "运行中";
   const result = String(build?.result ?? "").toUpperCase();
   return { SUCCESS: "成功", FAILURE: "失败", UNSTABLE: "不稳定", ABORTED: "已中止", NOT_BUILT: "未构建" }[result] ?? { blue: "成功", red: "失败", yellow: "不稳定" }[color] ?? "状态未知";
+}
+
+// Model-visible results replace Jenkins `color` with `status` and `building`.
+function jobStatusOf(job) {
+  if (job?.building) return "运行中";
+  const fromStatus = { success: "成功", failure: "失败", unstable: "不稳定", aborted: "已中止", notBuilt: "未构建" }[job?.status];
+  const fromBuild = statusOf(job?.lastBuild, job?.color);
+  return fromBuild !== "状态未知" ? fromBuild : fromStatus ?? fromBuild;
 }
 
 function duration(ms) {
@@ -20,39 +28,15 @@ function evidenceFrom(log) {
   return (matches.length ? matches.slice(-3) : lines.slice(-3)).map((line) => line.slice(0, 240)).join("\n") || "日志中没有可显示的内容。";
 }
 
-function StatusMark({ status }) {
-  const Icon = status === "成功" ? CheckCircle2 : status === "运行中" ? LoaderCircle : status === "排队中" ? Clock3 : CircleAlert;
-  const tone = status === "成功" ? "ok" : ["失败", "不稳定", "已中止", "已取消"].includes(status) ? "bad" : "pending";
-  return <span className={`inline-status ${tone}`}><Icon size={17} className={status === "运行中" ? "inline-status-spin" : undefined} aria-hidden="true" />{status}</span>;
-}
-
-function stageTone(status) {
-  if (status === "SUCCESS") return "done";
-  if (["IN_PROGRESS", "PAUSED_PENDING_INPUT"].includes(status)) return "current";
-  if (["FAILED", "ABORTED", "UNSTABLE"].includes(status)) return "bad";
-  return "pending";
-}
-
-function stageStatusLabel(status, ended) {
-  return { SUCCESS: "已完成", IN_PROGRESS: "运行中", PAUSED_PENDING_INPUT: "等待审批输入", FAILED: "失败", ABORTED: "已中止", UNSTABLE: "不稳定", NOT_EXECUTED: ended ? "已跳过" : "待执行", QUEUED: "排队中" }[status] ?? "状态未知";
+function StatusMark({ build, status, elapsed }) {
+  const value = status ?? buildStatus(build);
+  return <span className="inline-status"><StatusIcon status={value} elapsed={elapsed} previousDuration={build?.previousBuild?.duration} /><strong>{statusLabel(value)}</strong></span>;
 }
 
 function BuildStages({ stages, build }) {
-  if (stages === undefined) return <p className="inline-stage-unavailable">正在读取 Pipeline 阶段…</p>;
-  if (stages?.available === false) return <p className="inline-stage-unavailable">{stages.reason === "request_failed" ? `阶段读取失败：${stages.message || "请求失败"}` : stages.reason === "permission_denied" || stages.reason === "permission-denied" ? "无权限读取 Pipeline 阶段" : stages.reason === "not_found" ? "此构建没有可用的 Pipeline 阶段信息" : "此任务类型暂不支持 Pipeline 阶段"}</p>;
-  const stageList = Array.isArray(stages) ? stages : stages?.stages;
-  if (!stageList?.length) return <p className="inline-stage-unavailable">{build?.building ? "正在运行 · Jenkins 未提供阶段信息" : "此构建没有阶段记录"}</p>;
-  const ended = !build?.building;
-  const current = stageList.find((stage) => ["IN_PROGRESS", "PAUSED_PENDING_INPUT"].includes(stage.status));
-  const failed = stageList.find((stage) => ["FAILED", "ABORTED", "UNSTABLE"].includes(stage.status));
-  const summary = current ? `${current.status === "PAUSED_PENDING_INPUT" ? "等待审批输入" : "当前阶段"}：${current.name}` : failed ? `异常阶段：${failed.name}` : ended ? "阶段记录" : "当前阶段待 Jenkins 更新";
-  return <div className="inline-stage-block" aria-label="Pipeline 阶段状态">
-    <div className="inline-stage-summary"><span>{summary}</span></div>
-    <div className="inline-stage-track" role="list" aria-label="各阶段状态">
-      {stageList.map((stage, index) => <span key={`${stage.name}-${index}`} role="listitem" className={stageTone(stage.status)} title={`${stage.name}：${stageStatusLabel(stage.status, ended)}`} aria-label={`${stage.name}：${stageStatusLabel(stage.status, ended)}`} />)}
-    </div>
-    <div className="inline-stages">{stageList.map((stage, index) => <span key={`${stage.name}-${index}`} className={stageTone(stage.status)} title={`${stage.name}：${stageStatusLabel(stage.status, ended)}`}>{stage.name} · {stageStatusLabel(stage.status, ended)}</span>)}</div>
-  </div>;
+  if (!stages) return <p className="inline-subtext">正在读取阶段…</p>;
+  if (stages.available === false) return <p className="inline-subtext">{stages.reason === "permission_denied" ? "无权限读取阶段" : stages.reason === "request_failed" ? "阶段读取失败" : "没有可用的阶段信息"}</p>;
+  return <ol className="inline-stages" aria-label="阶段状态">{(stages.stages ?? []).map((stage, i) => <li key={i}><StatusIcon status={stage.status} label={`${stage.name}：${stage.status === "NOT_EXECUTED" && build.building ? "待执行" : statusLabel(stage.status)}`} /><span>{stage.name}</span></li>)}</ol>;
 }
 
 export function InlineCard({ ready, initial, input, hostError, call, bridge }) {
@@ -60,7 +44,7 @@ export function InlineCard({ ready, initial, input, hostError, call, bridge }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState(null);
-  const [logOpen, setLogOpen] = useState(false);
+  const [selectedJob, setSelectedJob] = useState("");
   const [stages, setStages] = useState(undefined);
   const [notice, setNotice] = useState("");
   const [updatedAt, setUpdatedAt] = useState(0);
@@ -88,7 +72,7 @@ export function InlineCard({ ready, initial, input, hostError, call, bridge }) {
   }, [ready, initial, input?.jobFullName, input?.buildNumber]);
 
   useEffect(() => {
-    setLog(null); setLogOpen(false); setError(""); setNotice("");
+    setLog(null); setSelectedJob(""); setError(""); setNotice("");
   }, [data?.view, data?.jobFullName, data?.build?.number]);
 
   const refresh = useCallback(async () => {
@@ -150,53 +134,53 @@ export function InlineCard({ ready, initial, input, hostError, call, bridge }) {
     } catch (cause) { setError(cause.message); }
   }
 
-  async function toggleEvidence() {
-    if (logOpen) { setLogOpen(false); return; }
-    setLogOpen(true);
-    if (log !== null || data?.view !== "card") return;
-    const current=dataRef.current;
-    try { const result=await call("uiGetBuildLog", { jobFullName: current.jobFullName, buildNumber: current.build.number }); if(dataRef.current?.jobFullName===current.jobFullName&&dataRef.current?.build?.number===current.build.number)setLog(result); }
-    catch (cause) { if(dataRef.current?.jobFullName===current.jobFullName&&dataRef.current?.build?.number===current.build.number){setError(cause.message);setLog({ log: "日志读取失败" });} }
-  }
+  useEffect(() => {
+    if (!ready || data?.view !== "card" || !["FAILURE", "UNSTABLE"].includes(data.build?.result)) return;
+    let disposed = false;
+    call("uiGetBuildLog", { jobFullName: data.jobFullName, buildNumber: data.build.number })
+      .then((result) => { if (!disposed) setLog(result); })
+      .catch((cause) => { if (!disposed) setError(cause.message); });
+    return () => { disposed = true; };
+  }, [ready, data?.view, data?.jobFullName, data?.build?.number]);
 
   const issue = hostError || error;
-  if (!ready || !data) return <main className="inline-shell"><div className="inline-card inline-loading">{issue || (ready ? "正在读取 Jenkins 数据…" : "正在连接宿主…")}</div></main>;
+  if (!ready || !data) return <main className="inline-shell"><div className="inline-card inline-loading">{issue || (ready ? "正在读取构建…" : "正在连接宿主…")}</div></main>;
 
   const jobName = data.jobFullName;
   let body;
   if (data.view === "queue") {
     const queue = data.queue ?? {};
-    const cancelled = Boolean(queue.cancelled);
-    const expired = Boolean(queue.expired);
+    const ended = queue.cancelled || queue.expired;
     body = <>
-      <div className="inline-main-status"><StatusMark status={cancelled ? "已取消" : expired ? "队列项已过期" : "排队中"} /><span className="inline-id">队列 #{data.queueId}</span></div>
-      <p className="inline-subtext">{cancelled ? "Jenkins 已取消此队列项。" : expired ? "队列记录已过期，未找到关联构建。" : queue.why || "等待 Jenkins 分配执行器"}</p>
-      {!cancelled && !expired && <div className="inline-steps" aria-label="构建进度"><span className="done">已提交</span><span className="current">排队中</span><span>运行中</span><span>完成</span></div>}
-      {!cancelled && !expired && <div className="inline-actions"><button type="button" onClick={refresh} disabled={busy}><RefreshCw size={15} />{busy ? "正在刷新" : "刷新状态"}</button></div>}
+      <div className="inline-main-status"><StatusMark status={queue.cancelled ? "ABORTED" : queue.expired ? "NOT_BUILT" : "QUEUED"} /><strong>队列 #{data.queueId}</strong></div>
+      <p className="inline-subtext">{queue.cancelled ? "队列项已取消。" : queue.expired ? "队列记录已过期，未找到关联构建。" : queue.why || "等待分配执行器"}</p>
+      {!ended && <div className="inline-actions"><button className="primary" onClick={refresh} disabled={busy}>{busy ? "正在刷新" : "刷新状态"}</button>{queue.task?.url && <button className="secondary" onClick={() => open(queue.task.url)}>在 Jenkins 打开</button>}</div>}
     </>;
   } else if (data.view === "card") {
     const build = data.build;
     const status = statusOf(build);
     const elapsed = build.building && Number.isFinite(build.timestamp) ? Math.max(0, now - build.timestamp) : build.duration;
     body = <>
-      <div className="inline-main-status"><StatusMark status={status} /><span className="inline-id">#{build.number} · {duration(elapsed)}</span></div>
+      <div className="inline-main-status"><StatusMark build={build} elapsed={elapsed} /><strong>#{build.number}</strong><span>{duration(elapsed)}</span></div>
+      {build.building && <p className="inline-subtext">{build.previousBuild?.duration > 0 ? `进度为估算 · 上次耗时 ${duration(build.previousBuild.duration)}` : "尚无上次耗时，无法估算进度"}</p>}
       <BuildStages stages={stages} build={build} />
-      {!build.building && <p className="inline-subtext">{build.description || `构建${status}。`}</p>}
-      {["失败", "不稳定"].includes(status) && <div className="inline-evidence"><button type="button" className="inline-disclosure" aria-expanded={logOpen} onClick={toggleEvidence}>{logOpen ? "收起日志证据" : "查看日志证据"}</button>{logOpen && <><pre>{log === null ? "正在读取日志…" : evidenceFrom(log.log)}</pre>{log?.truncated && <small>只读取了日志前 64 KiB；可能还有后续内容。</small>}</>}</div>}
+      {!build.building && build.description && <p className="inline-subtext">{build.description}</p>}
+      {log && <pre className="inline-log">{evidenceFrom(log.log)}</pre>}
+      {log?.truncated && <small>日志仅包含前 64 KiB。</small>}
       <div className="inline-actions">
-        {build.building ? <button type="button" onClick={refresh} disabled={busy}><RefreshCw size={15} />{busy ? "正在刷新" : "刷新状态"}</button> : <button type="button" onClick={() => ask(`请分析 Jenkins 任务 ${jobName} 的构建 #${build.number}，依据 Jenkins 构建数据和日志说明${status === "成功" ? "结果与下一步" : "失败或异常原因、证据与下一步"}。`)}><Sparkles size={15} />{status === "成功" ? "让 Codex 总结" : "让 Codex 分析"}</button>}
-        {build.url && <button type="button" className="secondary" onClick={() => open(build.url)}><ExternalLink size={15} />在 Jenkins 打开</button>}
+        {build.building ? <button className="primary" onClick={refresh} disabled={busy}>刷新状态</button> : <button className="primary" onClick={() => ask(`请分析 Jenkins 任务 ${jobName} 的构建 #${build.number}，依据构建数据和日志说明结果、证据与下一步。`)}>让 Codex 分析</button>}
+        {build.url && <button className="secondary" onClick={() => open(build.url)}>在 Jenkins 打开</button>}
       </div>
     </>;
   } else if (data.view === "choices") {
-    const jobs = (data.jobs ?? []).filter((job) => {
-      const result = statusOf(job.lastBuild, job.color);
-      return data.filter === "all" || (data.filter === "failed" && ["失败", "不稳定"].includes(result)) || (data.filter === "running" && result === "运行中");
-    }).slice(0, 5);
-    body = <><p className="inline-subtext">{data.filter === "failed" ? "选择一个异常任务继续排查" : "选择一个任务查看最近构建"}</p><div className="inline-choices">{jobs.length ? jobs.map((job) => <button type="button" key={job.fullName || job.name} onClick={() => ask(`请查看 Jenkins 任务 ${job.fullName || job.name} 的最近一次构建状态。`)}><span>{job.fullName || job.name}</span><StatusMark status={statusOf(job.lastBuild, job.color)} /><ArrowUpRight size={14} /></button>) : <p>没有符合条件的任务。</p>}</div></>;
+    const jobs = (data.jobs ?? []).filter((job) => data.filter === "all" || (data.filter === "failed" ? ["失败", "不稳定"].includes(jobStatusOf(job)) : jobStatusOf(job) === "运行中")).slice(0, 5);
+    body = <><p className="inline-subtext">选择一个任务继续排查</p><fieldset className="inline-choices"><legend className="sr-only">任务</legend>{jobs.length ? jobs.map((job) => {
+      const name = job.fullName || job.name;
+      return <label key={name}><input type="radio" name="job" value={name} checked={selectedJob === name} onChange={() => setSelectedJob(name)} /><span>{name}</span><small>{jobStatusOf(job)}</small></label>;
+    }) : <p>没有符合条件的任务。</p>}</fieldset>{jobs.length > 0 && <div className="inline-actions"><button className="primary" disabled={!selectedJob} onClick={() => ask(`请查看 Jenkins 任务 ${selectedJob} 的最近一次构建状态。`)}>查看构建</button></div>}</>;
   } else if (data.view === "comparison") {
-    body = <><p className="inline-subtext">同一任务的两次构建</p><div className="inline-compare">{[data.before, data.after].map((build, index) => <div key={build.number}><small>{index === 0 ? "之前" : "之后"} · #{build.number}</small><StatusMark status={statusOf(build)} /><span>{duration(build.duration)}</span></div>)}</div><div className="inline-actions"><button type="button" onClick={() => ask(`请比较 Jenkins 任务 ${jobName} 的构建 #${data.before.number} 和 #${data.after.number}，依据构建记录、提交和日志说明可证实的差异。`)}><Sparkles size={15} />让 Codex 比较</button>{data.after.url && <button type="button" className="secondary" onClick={() => open(data.after.url)}><ExternalLink size={15} />打开新构建</button>}</div></>;
-  } else body = <p className="inline-subtext">暂不支持此卡片类型。</p>;
+    body = <><p className="inline-subtext">两次构建的结果与耗时</p><div className="inline-compare">{[data.before, data.after].map((build, index) => <div key={build.number}><small>{index === 0 ? "之前" : "之后"} · #{build.number}</small><StatusMark build={build} /><span>{duration(build.duration)}</span></div>)}</div><div className="inline-actions"><button className="primary" onClick={() => ask(`请比较 Jenkins 任务 ${jobName} 的构建 #${data.before.number} 和 #${data.after.number}，依据构建记录、提交和日志说明可证实的差异。`)}>让 Codex 比较</button>{data.after.url && <button className="secondary" onClick={() => open(data.after.url)}>在 Jenkins 打开</button>}</div></>;
+  } else body = <p>暂不支持此卡片类型。</p>;
 
-  return <main className="inline-shell"><section className="inline-card" aria-label="Jenkins 内联卡片"><header><strong>{data.view === "comparison" ? "构建对比" : data.view === "choices" ? "选择任务" : "构建"}</strong>{jobName && <span title={jobName}>{jobName}</span>}</header>{body}{active && <small className="inline-updated">打开期间自动刷新 · 上次更新 {updatedAt ? `${Math.max(0, Math.floor((now - updatedAt) / 1000))} 秒前` : "刚刚"}</small>}{notice && <div className="inline-notice" role="status">{notice}</div>}{issue && <div className="inline-error" role="alert">{issue}</div>}</section></main>;
+  return <main className="inline-shell"><section className="inline-card" aria-label="构建卡片"><header>{jobName || (data.view === "comparison" ? "构建对比" : "选择任务")}</header>{body}{active && <small className="inline-updated">可见时自动刷新 · {updatedAt ? `${Math.max(0, Math.floor((now - updatedAt) / 1000))} 秒前更新` : "刚刚更新"}</small>}{notice && <div role="status">{notice}</div>}{issue && <div className="inline-error" role="alert">{issue}</div>}</section></main>;
 }

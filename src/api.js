@@ -228,7 +228,7 @@ export const apiTools = [
   {
     name: "getBuild", title: "查看 Jenkins 构建", description: "查看指定编号的构建；省略 buildNumber 时读取最近一次构建。",
     inputSchema: { type: "object", properties: { jobFullName: { type: "string" }, buildNumber: { type: "integer", minimum: 1 } }, required: ["jobFullName"], additionalProperties: false }, readOnly: true,
-    call: async (config, args) => jsonResult(await getJson(config, `${jobPath(args.jobFullName)}/${args.buildNumber ?? "lastBuild"}/api/json?tree=${encodeURIComponent("number,result,building,queueId,url,timestamp,duration,description,changeSet[items[commitId,msg,author[fullName]]]")}`)),
+    call: async (config, args) => jsonResult(await getJson(config, `${jobPath(args.jobFullName)}/${args.buildNumber ?? "lastBuild"}/api/json?tree=${encodeURIComponent("number,result,building,queueId,url,timestamp,duration,previousBuild[number,duration],description,changeSet[items[commitId,msg,author[fullName]]]")}`)),
   },
   {
     name: "getBuildLog", title: "查看 Jenkins 构建日志", description: "读取指定或最近一次构建的纯文本控制台输出，最多 64 KiB。",

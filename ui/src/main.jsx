@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { App, applyDocumentTheme } from "@modelcontextprotocol/ext-apps";
+import { App, applyDocumentTheme, applyHostStyleVariables } from "@modelcontextprotocol/ext-apps";
 import { CheckCircle2, CircleAlert, Clock3, ExternalLink, Layers3, LoaderCircle, MessageCircle, RefreshCw, Search, X } from "lucide-react";
 import jenkinsHeadshot from "../../assets/jenkins-headshot.png";
 import { InlineCard } from "./inline.jsx";
 import { createAutoExpandController } from "./display-mode.js";
 import "./style.css";
+import "./theme.css";
 
 const mode = document.body.dataset.mode;
 const bridge = new App({ name: "jenkins-plugin-ui", version: document.body.dataset.uiVersion }, {
@@ -18,7 +19,9 @@ applyDocumentTheme(systemTheme.matches ? "dark" : "light");
 systemTheme.addEventListener("change", (event) => {
   if (!hasHostTheme) applyDocumentTheme(event.matches ? "dark" : "light");
 });
-function applyHostTheme({ theme } = {}) {
+function applyHostTheme({ theme, styles } = {}) {
+  if (styles?.variables) applyHostStyleVariables(styles.variables);
+  document.body.dataset.hostStyles = String(Boolean(styles?.variables && Object.keys(styles.variables).length));
   if (theme) {
     hasHostTheme = true;
     applyDocumentTheme(theme);

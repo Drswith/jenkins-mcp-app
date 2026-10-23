@@ -1,0 +1,32 @@
+:root {
+  --fallback-surface: #fff; --fallback-secondary: #f3f3f3; --fallback-tertiary: #efefef;
+  --fallback-text: #000; --fallback-muted: #5b5b5b; --fallback-line: #e4e4e4;
+  --fallback-success: #00692a; --fallback-danger: #911e1b; --fallback-warning: #923b0f; --fallback-info: #0169cc;
+  --brand: oklch(55% 0.2308 256.91); --on-brand: #fff;
+  --surface: var(--color-background-primary, var(--fallback-surface));
+  --surface-secondary: var(--color-background-secondary, var(--fallback-secondary));
+  --surface-tertiary: var(--color-background-tertiary, var(--fallback-tertiary));
+  --text: var(--color-text-primary, var(--fallback-text)); --muted: var(--color-text-secondary, var(--fallback-muted));
+  --line: var(--color-border-primary, var(--fallback-line)); --radius: var(--border-radius-md, 10px);
+  --success: var(--color-text-success, var(--fallback-success)); --danger: var(--color-text-danger, var(--fallback-danger));
+  --warning: var(--color-text-warning, var(--fallback-warning)); --info: var(--color-text-info, var(--fallback-info));
+  --status-background-opacity: .125; --status-border-opacity: .25;
+  font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  color: var(--text); background: transparent;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --fallback-surface: #111; --fallback-secondary: #1b1b1b; --fallback-tertiary: #2b2b2b;
+  --fallback-text: #fff; --fallback-muted: #a5a5a5; --fallback-line: #333;
+  --fallback-success: #04b84c; --fallback-danger: #e02e2a; --fallback-warning: #e25507; --fallback-info: #66b5ff;
+  --brand: oklch(65.13% 0.1987 265); --on-brand: #0e1016;
+  color: var(--text); background: transparent;
+}
+.status-icon { width: 28px; height: 28px; flex: none; }
+.tone-success { color: var(--success); } .tone-danger { color: var(--danger); }
+.tone-warning { color: var(--warning); } .tone-info { color: var(--info); } .tone-secondary { color: var(--muted); }
+a, .commit { color: var(--info); }
+button, input, select, textarea { font: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid var(--info); outline-offset: 3px; }
+@media (prefers-contrast: more) { :root { --status-background-opacity: 0; --status-border-opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
