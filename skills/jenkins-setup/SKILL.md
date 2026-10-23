@@ -1,10 +1,12 @@
 ---
 name: jenkins-setup
-description: Set up and verify this Jenkins Codex plugin against a user-owned Jenkins controller.
+description: Use when the user asks to install, configure, connect, or verify the Jenkins plugin.
 ---
 
-# Jenkins setup
+# Set up Jenkins
 
-Read the packaged `docs/configuration.md` for supported connection modes. Ask the user for the Jenkins controller URL and preferred mode if unknown. Do not ask them to paste an API token into chat. Guide them to run `node dist/configure.mjs` from the installed plugin folder, or `node release/jenkins/dist/configure.mjs` from the source checkout, in their own terminal; it prompts for the token without echoing it and stores a private local file.
-
-Use a read tool (`getStatus` or `whoAmI` in MCP mode, `getJobs` in API mode) to verify the actual connection and authorization. Report which mode and tool worked. If the tool cannot connect, distinguish a missing configuration, Jenkins permission failure, unsupported MCP endpoint and network route. Do not switch to API mode silently.
+1. **Input and scope.** Determine the intended controller and connection mode from user-provided context. Explicit user instructions take precedence. Ask only if these are missing or ambiguous. Never ask for an API token in chat, infer an internal URL, or reuse credentials from unrelated systems.
+2. **Configure privately.** Follow the packaged [configuration guide](../../docs/configuration.md). Ask the user to run `node dist/configure.mjs` from the installed package in their terminal (from this repository use `node release/jenkins/dist/configure.mjs`). The terminal prompts for credentials privately. Do not print or commit the private file. Stop on unsafe file permissions or invalid configuration.
+3. **Verify reads.** In MCP mode use `getStatus` or `whoAmI` if available; in API mode use `getJobs`. The settings action “检测连接与权限” provides read-only checks. No sample build is needed. Successful reads do not prove build permission or host approval behavior. Do not silently switch modes; report unavailable endpoints, permissions and network failures separately.
+4. **Preferences and UI.** In native plugin settings set only the watched job names (at most eight) and evidence lines (1–10). Credentials never appear there; masking is always enabled. If native settings are absent, follow the private display-settings file fallback in the configuration guide. An empty watch list is a valid initial state. Check the actual host's rendering and capabilities; a local preview is not native-host evidence.
+5. **Output or stop.** Report the connection mode and read tool that succeeded, UI capabilities actually tested, and any remaining failure. On network failure inspect direct/proxy paths and current local routing before retrying; keep internal addresses off public proxies. Never trigger a real build, change Jenkins permissions, deploy a public endpoint, or promise approvals as part of setup.

@@ -165,7 +165,7 @@ export function InlineCard({ ready, initial, input, hostError, call, bridge, hos
   const jobName = data.jobFullName;
   let body;
   if (data.view === "connection") {
-    body = <ul className="connection-checks">{data.checks.map((check) => <li key={check.capability}><span>{check.capability}</span><span className={check.status === "available" ? "tone-success" : check.status === "denied" ? "tone-danger" : "tone-secondary"}>{{available:"可用",denied:"无权限",unavailable:"不可用",unknown:"未验证",error:"读取失败"}[check.status]}</span>{check.message && <small>{check.message}</small>}</li>)}</ul>;
+    body = <><p className="subtle">读取结果仅针对本次抽样任务及构建，不代表全部任务。</p><ul className="connection-checks">{data.checks.map((check) => <li key={check.capability}><span>{check.capability}</span><span className={check.status === "available" ? "tone-success" : check.status === "denied" ? "tone-danger" : "tone-secondary"}>{{available:"可用",denied:"无权限",unavailable:"不可用",unknown:"未验证",error:"读取失败"}[check.status]}</span>{check.message && <small>{check.message}</small>}</li>)}</ul></>;
   } else if (data.view === "confirmation") {
     body = <Confirmation key={JSON.stringify(data)} data={data} bridge={bridge} />;
   } else if (data.view === "queue") {

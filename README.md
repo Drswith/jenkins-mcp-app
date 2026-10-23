@@ -4,14 +4,15 @@ An installable local OpenAI Codex plugin that packages a Jenkins MCP bridge and 
 
 ## What it does
 
-- Read jobs, declared parameters, Git parameter choices, builds, logs, test results and queue state (the exact tool set follows Jenkins permissions and the chosen mode).
-- Schedule a build when requested, then follow its queue item and build.
-- Show compact, interactive conversation cards for queue tracking, build status, job selection and build comparison in compatible MCP Apps hosts.
-- Keep Jenkins credentials in a private local config file or process environment. No credentials belong in this repository or plugin manifest.
+- Bring one Jenkins build's status, numbered log evidence, stages and changes into a conversation.
+- Review and edit safe parameters in a confirmation card, then hand them back to the model for a user-requested build.
+- Track the returned queue item without guessing which build it became.
+- Open a small watched-jobs page; use Jenkins deep links for browsing and administration.
+- Keep credentials private and separate from the two display settings; mask secrets on every tool response.
 
-This is a local plugin. It includes built MCP Apps UI resources for compatible hosts, but does not include a public MCP endpoint or hosted authentication. Private ChatGPT testing can use a [Secure MCP Tunnel](https://developers.openai.com/plugins/deploy/connect-chatgpt); public directory submission requires a deployed HTTPS MCP server and separate review.
+This is a local plugin. It includes built MCP Apps UI resources for compatible hosts, but does not include a public MCP endpoint or hosted authentication. Private ChatGPT testing can use a [Secure MCP Tunnel](https://developers.openai.com/plugins/deploy/connect-chatgpt). Public submission requirements remain **pending verification** before publication; the annotation-guidance conflict and retained rationale are recorded in [configuration](docs/configuration.md#tool-annotations-and-packaging).
 
-The installable package is **`release/jenkins/`**. Its contents are built ahead of installation: bundled Node executables, three self-contained UI resources, plugin manifests, skills, one configuration guide, icon and license. The marketplace points at that directory. Codex does not install this repository's `src/`, `ui/src/`, `test/`, `node_modules/`, package manifest or lock file.
+The installable package is **`release/jenkins/`**. Its contents are built ahead of installation: bundled Node executables, two self-contained UI resources, plugin manifests, skills, one configuration guide, icon and license. The marketplace points at that directory. Codex does not install this repository's `src/`, `ui/src/`, `test/`, `node_modules/`, package manifest or lock file.
 
 The plugin marketplace uses the square, full-color Jenkins portrait. Small Codex entrypoints use a monochrome build icon adapted from an official Jenkins symbol; the UI artwork is unmodified [official Jenkins artwork](assets/ATTRIBUTION.md). This is a community-maintained integration and is not endorsed by the Jenkins project.
 
@@ -42,10 +43,10 @@ The skill files under `skills/` are runtime instructions packaged with the plugi
 
 ## Interface preview
 
-Run `pnpm build && pnpm ui:preview` to inspect the current installable MCP Apps UI. The preview page includes queue, running, running without stage data, success, failure, selection and comparison scenarios for the inline card. The [earlier interactive design prototype](prototype/README.md) and its images are exploratory material; they are not the current built UI or part of the installable package.
+Run `pnpm build && pnpm ui:preview` to inspect the current installable MCP Apps UI. The preview page includes confirmation, queue, running, running without stage data, success, failure, selection and comparison scenarios for the inline card. The [earlier interactive design prototype](prototype/README.md) and its images are exploratory material; they are not the current built UI or part of the installable package.
 
 ## Project status
 
-The repository includes a local plugin, a Jenkins MCP proxy, an API mode and MCP Apps UI resources. Automated tests use simulated Jenkins HTTP and MCP servers. Version 0.1.11 is installed and active in the current Codex connection, with all 19 packaged files matching `release/jenkins/`. SG native-host validation on 0.1.10 captured the same card progressing from queue #161 to running build #4 and SUCCESS across three screenshots. A separate 0.1.11 card for that existing build verified an actual inline-to-fullscreen request and successful automatic expansion, without manual expansion, refresh, reopening, or restarting Codex. No new builds were needed for the display-mode test. Earlier host-control timeouts remain unexplained; current validation and installation-resource compatibility details are recorded in [target compatibility](docs/target-compatibility.md).
+The 0.2.0 package includes the stdio bridge, two MCP Apps resources, structured settings and three focused skills. Automated checks use simulated Jenkins HTTP and MCP servers, with separate browser interaction and read-only SG checks. Current native-host evidence, unavailable features and untested approval behavior are recorded in [target compatibility](docs/target-compatibility.md). Historical 0.1.11 host evidence is retained there and does not establish 0.2.0 support.
 
 The SG cloud now retains Jenkins 2.263.1 with Gitea 28.1.0. Migration, replay, and current API readback evidence—including the delayed deletion state of the stopped source service—is recorded in the [authoritative compatibility snapshot](docs/legacy-test.md); [cloud test operations](docs/zeabur-test.md) retains the service history. Historical 2.580.1 smoke testing passed MCP/API calls, UI resources, sample builds and Gitea checkout/change-set queries; it does not establish MCP Apps rendering inside Codex desktop or ChatGPT.

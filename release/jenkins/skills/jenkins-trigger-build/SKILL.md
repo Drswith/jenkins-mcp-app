@@ -1,10 +1,14 @@
 ---
 name: jenkins-trigger-build
-description: Trigger a Jenkins job requested by the user and follow its queue item and resulting build.
+description: Use when the user explicitly asks to run or trigger a Jenkins build.
 ---
 
 # Trigger a build
 
-Resolve the exact job with `getJob` and check requested parameters before using `triggerBuild`. When available, use `getJobParameters` to read declared defaults and Choice options, and `getGitParameterChoices` for the requested Git parameter. Definitions describe task defaults, not selected values in a historical build. Treat candidate errors or truncation explicitly; do not invent branches or infer that an error means no candidates. The tool contract is in [configuration](../../docs/configuration.md#parameter-reads).
+1. **Input and authorization.** Read the user's requested job and parameters. Explicit user instructions take precedence over this workflow. A request to investigate, preview, or test the plugin does not authorize a build. Ask only for missing or ambiguous target details; stop if the user cancels or prohibits execution.
+2. **Resolve facts.** Use `getJob` for the full job name, then `getJobParameters` for declared types and safe defaults. Use `getGitParameterChoices` when a requested Git value needs checking. Defaults are not historical selections. Do not infer a branch, deployment environment, build permission, or successful candidate lookup from missing, truncated, or failed data. Sensitive, file and unsupported parameters must be handled in Jenkins; do not request secrets in chat.
+3. **Review.** Call `showJenkinsTriggerConfirmation` with the exact job and proposed parameters. The card permits editing and sends the final values back through the conversation. If the host cannot render or send the card, present the same safe values in text and wait for explicit confirmation. Cancel or ambiguous delivery means stop, not an automatic retry.
+4. **Submit once.** After explicit confirmation, call `triggerBuild` with the final parameters, subject to host approval. Jobs may deploy or irreversibly change external systems. Tool annotations do not guarantee that this host will prompt for approval. Never bypass a denial. Repeated calls queue repeated builds; if submission times out, inspect the queue before any resubmission and ask if the outcome remains uncertain.
+5. **Output and tracking.** Preserve the returned queue ID. Call `showJenkinsQueueCard` without automatic expansion when an ID exists. Use `getQueueItem` and `getBuild` for later factual status reports. The visible card polls only while open. Do not claim completion while queued/running, infer a build from “latest” when queue correlation fails, or repeat the card's facts below it. Report only a necessary next step or unresolved issue.
 
-A build may deploy or mutate external systems, so ask for missing job or parameter details when the intended target is ambiguous. Use the user request as the authorization for the build; do not trigger one while merely investigating or browsing. After scheduling, return the queue item ID or URL. When a queue ID is available and a visual tracker would help, call `showJenkinsQueueCard` with the exact job full name and numeric queue ID. The card refreshes only while open. Use `getQueueItem` and then `getBuild` for model-side status reports; never claim completion while the run is queued or building.
+Tool and security contract: [configuration](../../docs/configuration.md).

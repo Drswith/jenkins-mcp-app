@@ -23,6 +23,7 @@ export function prepareParameters(definitions, proposed = {}) {
 
 export function changesSinceSuccess(builds, targetNumber) {
   const history = builds.filter((build) => Number.isInteger(build.number) && build.number <= targetNumber).sort((a, b) => b.number - a.number);
+  if (!history.some((build) => build.number === targetNumber)) return { available: false, reason: "目标构建不在最近 50 条历史中，无法确定比较范围", commits: [] };
   const baseline = history.find((build) => build.number < targetNumber && !build.building && build.result === "SUCCESS");
   if (!baseline) return { available: false, reason: "最近 50 条历史中未找到此前成功构建，无法确定比较范围", commits: [] };
   const seen = new Set();

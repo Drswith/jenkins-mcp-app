@@ -117,6 +117,7 @@ test("API URLs stay under the configured Jenkins root and queue locations are va
 
 test("stdio MCP bridge reads and schedules through Jenkins API", async () => {
   const calls = [];
+  let stageStatus = 200;
   const httpServer = createServer(async (req, res) => {
     calls.push({ method: req.method, url: req.url, auth: req.headers.authorization });
     assert.equal(req.headers.authorization, "Basic dXNlcjp0b2tlbg==");
@@ -144,6 +145,7 @@ test("stdio MCP bridge reads and schedules through Jenkins API", async () => {
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({builds:[{number:42,result:"FAILURE",changeSet:{items:[{commitId:"abc",msg:"fix",author:{fullName:"Ada"}}]}},{number:41,result:"SUCCESS"}]}));
     } else if (req.url === "/jenkins/job/folder/job/build%20main/42/wfapi/describe") {
+      if (stageStatus !== 200) { res.writeHead(stageStatus).end(); return; }
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ stages: [{ name: "检出", status: "SUCCESS" }, { name: "测试", status: "FAILED" }] }));
     } else if (req.url === "/jenkins/job/folder/job/build%20main/40/wfapi/describe") {
@@ -222,6 +224,14 @@ test("stdio MCP bridge reads and schedules through Jenkins API", async () => {
     assert.equal(watched.structuredContent.jobs.length,1);
     const connection = await client.callTool({name:"checkJenkinsConnection",arguments:{}});
     assert.equal(connection._meta.card.checks.find((check)=>check.capability === "触发构建权限").status,"unknown");
+    for (const [httpStatus, status] of [[404,"unavailable"],[403,"denied"],[500,"error"]]) {
+      stageStatus = httpStatus;
+      const result = await client.callTool({name:"checkJenkinsConnection",arguments:{}});
+      const stageCheck = result.structuredContent.checks.find((check)=>check.capability === "Pipeline 阶段");
+      assert.equal(stageCheck.status,status);
+      if (httpStatus === 404) assert.match(stageCheck.message,/当前样本/);
+    }
+    stageStatus = 200;
     assert.equal(calls.filter((call)=>call.method === "POST").length,0);
     assert.deepEqual(tools.tools.find((tool) => tool.name === "uiGetBuild")._meta.ui.visibility, ["app"]);
     assert.deepEqual(tools.tools.find((tool) => tool.name === "uiGetJobParameters")._meta.ui.visibility, ["app"]);

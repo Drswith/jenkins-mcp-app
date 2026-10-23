@@ -7,6 +7,7 @@ const requestedJob = query.get("job");
 const requestedBuild = Number(query.get("build"));
 const requestedQueue = Number(query.get("queue"));
 const initialTheme = query.get("theme") === "dark" ? "dark" : "light";
+const limited = query.get("host") === "limited";
 const live = document.body.dataset.live === "true";
 const iframe = document.querySelector("iframe");
 iframe.src = `/widget/${["workspace", "card"].includes(mode) ? mode : "workspace"}`;
@@ -36,7 +37,7 @@ function reply(data) {
   return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
 }
 
-const bridge = new AppBridge(null, { name: "Jenkins UI preview", version: "0.1.0" }, { serverTools: {}, openLinks: {}, message: { text: {} }, updateModelContext: { text: {} }, experimental: { "openai/message": {}, "openai/modelContext": {} } }, { hostContext: { theme: initialTheme, platform: "desktop", displayMode: "inline", availableDisplayModes: ["inline", "fullscreen"] } });
+const bridge = new AppBridge(null, { name: "Jenkins UI preview", version: "0.1.0" }, { serverTools: {}, openLinks: {}, ...(limited ? {} : { message: { text: {} }, updateModelContext: { text: {} }, experimental: { "openai/message": {}, "openai/modelContext": {} } }) }, { hostContext: { theme: initialTheme, platform: query.get("platform") || "desktop", displayMode: "inline", availableDisplayModes: limited ? ["inline"] : ["inline", "fullscreen"], ...(query.has("styled") ? {styles:{variables:{"--color-text-primary":"#123456","--border-radius-md":"14px","--font-sans":"system-ui"}}} : {}) } });
 const themeSelect = document.querySelector("#theme");
 themeSelect.value = initialTheme;
 function setPreviewTheme(theme) {
@@ -81,7 +82,7 @@ bridge.oncalltool = async ({ name, arguments: args }) => {
   return { isError: true, content: [{ type: "text", text: "未知工具" }] };
 };
 bridge.onupdatemodelcontext = async ({ content }) => { document.querySelector("#message").textContent = content?.[0]?.text || "附件已移除"; bridge.setHostContext({ "openai/modelContext": content.length ? { updateId: crypto.randomUUID(), content } : null }); return {}; };
-bridge.onmessage = async ({ content }) => { document.querySelector("#message").textContent = content?.[0]?.text || ""; return {}; };
+bridge.onmessage = async ({ content }, { _meta }) => { document.body.dataset.messageTarget = _meta?.["openai/message"]?.target || "active"; document.querySelector("#message").textContent = content?.[0]?.text || ""; return {}; };
 bridge.onopenlink = async ({ url }) => { document.querySelector("#message").textContent = `将打开：${url}`; return {}; };
 bridge.onrequestdisplaymode = async ({ mode: next }) => { iframe.classList.toggle("expanded", next === "fullscreen"); bridge.setHostContext({displayMode: next}); return { mode: next }; };
 bridge.onsizechange = ({height}) => {

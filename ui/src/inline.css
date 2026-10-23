@@ -25,7 +25,7 @@ button:hover:not(:disabled) { filter: brightness(.96); }
 .inline-compare small, .inline-updated, .inline-card > small { color: var(--muted); }
 .inline-updated { display: block; margin-top: 12px; font-size: 12px; }
 .inline-log { padding: 12px; margin: 12px 0; background: var(--surface-secondary); border-radius: var(--radius); white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 ui-monospace, monospace; color: var(--text); }
-.inline-error { color: var(--danger); margin-top: 12px; }
+.inline-error { color: var(--text); border-left: 3px solid var(--danger); padding-left: 8px; margin-top: 12px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 @media (max-width: 320px) { .inline-card { padding: 12px; } .inline-compare { grid-template-columns: 1fr; } }
 .parameter-editor { display: grid; gap: 12px; }

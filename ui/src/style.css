@@ -13,3 +13,5 @@ button { cursor: pointer; }
 .connection-checks li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .connection-checks small { width: 100%; color: var(--muted); }
 @media (max-width: 600px) { .workspace { padding: 20px; } .watch-list { grid-template-columns: 1fr; } }
+
+.connection-checks .tone-danger { color: var(--text); border-left: 3px solid var(--danger); padding-left: 6px; }

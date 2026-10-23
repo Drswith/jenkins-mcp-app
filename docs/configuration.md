@@ -74,3 +74,53 @@ declares the bundled `jenkins` MCP dependency; its stdio launch contract stays
 in root `mcp.json`. See [packaging](https://developers.openai.com/plugins/build/plugins).
 
 Filtering also applies to UI-only result `_meta`. No secret-masking setting exists.
+
+## Display settings
+
+The server advertises `openai/settings` with `readJenkinsSettings` and
+`updateJenkinsSettings`. The read tool accepts `{}` and returns `schema`, `values`
+and `layout`; the update tool accepts `{set:{...changedFields}}` and preserves
+other values. These app-only tools do not read or change credentials.
+
+| Field | Type and bounds | Default |
+| --- | --- | --- |
+| `watchedJobs` / 关注的任务 | Comma-separated full names, up to 8 distinct jobs and 2048 characters | Empty |
+| `evidenceLines` / 卡片中的日志证据行数 | Integer 1–10 | 3 |
+
+Values persist at `<credential-config-path>.settings.json`, normally
+`~/.config/jenkins-codex-plugin/config.json.settings.json`. The file contains only
+these two fields. It must be a private regular file (0600 on Unix); symlinks and
+invalid content are rejected. Writes use a private temporary file and atomic
+rename. A malformed existing file is never silently reset. The configured
+credential file remains separate and unchanged.
+
+If the host has no native settings UI, edit this display file in a private local
+editor, set its mode to 0600, then reopen the view. Example (placeholders only):
+
+```json
+{"watchedJobs":"folder/example-job", "evidenceLines":3}
+```
+
+The settings action `checkJenkinsConnection` has UI metadata so supporting hosts
+can show its result in a settings modal. It reads accessible jobs, one sample or
+watched job, parameter definitions, an existing build, its log and stages. It
+reports denied, unavailable, failed and unverified separately. It never posts to
+a build endpoint. `buildable:true` does not prove permission to execute a build;
+build permission stays unverified. MCP transport is separately verified through
+model read tools in MCP mode. URLs and tokens are not settings fields or check
+results; secret masking is always enabled.
+
+## Confirmation and evidence tools
+
+`showJenkinsTriggerConfirmation({jobFullName, parameters?})` reads declared
+parameters, validates types and Choice values, and displays safe defaults plus
+changes. Unknown, secret and unsupported submissions are rejected. It does not
+schedule anything. Card edits are sent to the conversation with `ui/message`;
+only the model can then call `triggerBuild` after user confirmation, subject to
+host safeguards. A hint alone cannot guarantee an approval dialog.
+
+`uiGetBuildEvidence({jobFullName, buildNumber?})` resolves one exact build before
+reading stages, bounded log excerpts and the last 50 build change sets. Results
+include original line numbers, truncation and unavailable-baseline indicators.
+Card results keep display data under `_meta.card` and model-needed facts under
+`structuredContent`. Both are sanitized. No card calls `triggerBuild` directly.

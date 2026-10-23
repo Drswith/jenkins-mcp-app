@@ -53,15 +53,15 @@ export const uiTools = [
   tool("showJenkinsBuildComparison", "在对话中比较同一 Jenkins 任务的两次构建", cardSchema(inputSchema.comparison), { view: "card" }),
   tool("uiGetWatchedJobs", "读取最多 8 个关注任务的最新结果", inputSchema.empty, { appOnly: true }),
   tool("checkJenkinsConnection", "只读检测连接与权限；构建执行权限保持未验证，不提交测试构建", inputSchema.empty, { title: "检测连接与权限", view: "card" }),
-  tool("uiListJobs", "读取工作台任务列表", inputSchema.empty, { appOnly: true }),
-  tool("uiGetJob", "读取工作台任务或文件夹", inputSchema.job, { appOnly: true }),
-  tool("uiGetBuild", "读取工作台构建详情", inputSchema.build, { appOnly: true }),
-  tool("uiGetBuildLog", "读取工作台构建日志", inputSchema.build, { appOnly: true }),
+  tool("uiListJobs", "读取任务候选", inputSchema.empty, { appOnly: true }),
+  tool("uiGetJob", "读取指定任务", inputSchema.job, { appOnly: true }),
+  tool("uiGetBuild", "读取指定构建详情", inputSchema.build, { appOnly: true }),
+  tool("uiGetBuildLog", "读取指定构建日志", inputSchema.build, { appOnly: true }),
   tool("uiGetQueueItem", "读取内联卡片队列项", { type: "object", properties: { queueId: { type: "integer", minimum: 1 } }, required: ["queueId"], additionalProperties: false }, { appOnly: true }),
-  tool("uiTrackQueue", "追踪工作台队列项及其对应构建", inputSchema.queue, { appOnly: true }),
+  tool("uiTrackQueue", "追踪队列项及其对应构建", inputSchema.queue, { appOnly: true }),
   tool("uiGetBuildStages", "读取可用的 Pipeline 阶段信息", inputSchema.build, { appOnly: true }),
-  tool("uiGetJobParameters", "读取工作台任务参数定义", inputSchema.parameterJob, { appOnly: true }),
-  tool("uiGetGitParameterChoices", "读取工作台 Git 参数候选", inputSchema.gitChoices, { appOnly: true }),
+  tool("uiGetJobParameters", "读取任务参数定义", inputSchema.parameterJob, { appOnly: true }),
+  tool("uiGetGitParameterChoices", "读取 Git 参数候选", inputSchema.gitChoices, { appOnly: true }),
 ];
 
 export const uiResources = Object.values(manifest).map(({ uri, file }) => ({
@@ -128,8 +128,8 @@ export async function callUiTool(config, name, args) {
         const exact = {jobFullName:name,buildNumber:job.structuredContent.lastBuild.number};
         await check("构建读取", () => apiByName.get("getBuild").call(config, exact));
         await check("日志读取", () => apiByName.get("getBuildLog").call(config, exact));
-        const stages = await callUiTool(config,"uiGetBuildStages",exact).catch(() => null);
-        checks.push({capability:"Pipeline 阶段",status:stages?.structuredContent.available ? "available" : stages?.structuredContent.reason === "permission_denied" ? "denied" : "unavailable"});
+        const stages = (await callUiTool(config,"uiGetBuildStages",exact).catch((error) => ({structuredContent:{available:false,reason:"request_failed",message:error.message}}))).structuredContent;
+        checks.push({capability:"Pipeline 阶段",status:stages.available ? "available" : stages.reason === "permission_denied" ? "denied" : stages.reason === "not_found" ? "unavailable" : "error",message:stages.reason === "not_found" ? "当前样本未提供阶段，不代表整个实例不可用" : stages.message});
       } else checks.push({capability:"构建、日志和阶段",status:"unknown",message:"没有可用于检测的既有构建"});
     } else checks.push({capability:"参数、构建、日志和阶段",status:"unknown",message:"没有可用于检测的任务"});
     checks.push({capability:"触发构建权限",status:"unknown",message:"只读检测无法确认执行权限，未触发构建"});
