@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { apiTools, normalizeJenkinsUrl, request } from "./api.js";
+import { readSettings, watchedJobs } from "./settings.js";
 import { logEvidence, prepareParameters, changesSinceSuccess } from "./evidence.js";
 import { jobPath } from "./config.js";
 
@@ -23,7 +24,6 @@ const inputSchema = {
   choices: { type: "object", properties: { filter: { type: "string", enum: ["all", "failed", "running"] } }, additionalProperties: false },
   comparison: { type: "object", properties: { jobFullName: { type: "string" }, beforeBuildNumber: { type: "integer", minimum: 1 }, afterBuildNumber: { type: "integer", minimum: 1 } }, required: ["jobFullName", "beforeBuildNumber", "afterBuildNumber"], additionalProperties: false },
   confirmation: { type: "object", properties: { jobFullName: { type: "string" }, parameters: { type: "object", additionalProperties: { type: ["string", "number", "boolean"] } } }, required: ["jobFullName"], additionalProperties: false },
-  optionalBuild: { type: "object", properties: { jobFullName: { type: "string" }, buildNumber: { type: "integer", minimum: 1 } }, additionalProperties: false },
   parameterJob: { type: "object", properties: { jobFullName: { type: "string" } }, required: ["jobFullName"], additionalProperties: false },
   gitChoices: { type: "object", properties: { jobFullName: { type: "string" }, parameterName: { type: "string" } }, required: ["jobFullName", "parameterName"], additionalProperties: false },
 };
@@ -44,14 +44,15 @@ function tool(name, description, schema, { title = description, view, entrypoint
 }
 
 export const uiTools = [
-  tool("openJenkinsWorkspace", "打开 Jenkins 工作台", inputSchema.empty, { title: "Jenkins", view: "workspace", entrypoint: "global" }),
-  tool("openJenkinsPanel", "在对话侧边栏查看 Jenkins 构建", inputSchema.optionalBuild, { title: "Jenkins 构建", view: "panel", entrypoint: "thread" }),
+  tool("openJenkinsWorkspace", "查看关注任务的最新结果", inputSchema.empty, { title: "Jenkins", view: "workspace", entrypoint: "global" }),
   tool("showJenkinsTriggerConfirmation", "准备触发确认卡，展示全部参数及默认值差异；只预览，不提交构建", cardSchema(inputSchema.confirmation), { view: "card" }),
   tool("uiGetBuildEvidence", "读取指定构建的阶段、日志片段及相对上次成功的变更", inputSchema.build, { appOnly: true }),
   tool("showJenkinsBuildCard", "在对话中显示 Jenkins 构建状态卡片；运行中可持续刷新，失败时可查看日志证据", cardSchema(inputSchema.build), { view: "card" }),
   tool("showJenkinsQueueCard", "追踪已提交的 Jenkins 队列项，默认保持内联；在 triggerBuild 返回队列 ID 后调用", cardSchema(inputSchema.queue), { view: "card" }),
   tool("showJenkinsJobChoices", "在对话中显示可选择的 Jenkins 任务", cardSchema(inputSchema.choices), { view: "card" }),
   tool("showJenkinsBuildComparison", "在对话中比较同一 Jenkins 任务的两次构建", cardSchema(inputSchema.comparison), { view: "card" }),
+  tool("uiGetWatchedJobs", "读取最多 8 个关注任务的最新结果", inputSchema.empty, { appOnly: true }),
+  tool("checkJenkinsConnection", "只读检测连接与权限；构建执行权限保持未验证，不提交测试构建", inputSchema.empty, { title: "检测连接与权限", view: "card" }),
   tool("uiListJobs", "读取工作台任务列表", inputSchema.empty, { appOnly: true }),
   tool("uiGetJob", "读取工作台任务或文件夹", inputSchema.job, { appOnly: true }),
   tool("uiGetBuild", "读取工作台构建详情", inputSchema.build, { appOnly: true }),
@@ -101,7 +102,40 @@ export async function callUiTool(config, name, args) {
     return { ...response(facts), _meta: { card: { ...value, autoExpand: args.autoExpand ?? false } } };
   };
   if (name === "openJenkinsWorkspace") return response({ view: "workspace" });
-  if (name === "openJenkinsPanel") return response({ view: "panel", ...args });
+  if (name === "uiGetWatchedJobs") {
+    const names = watchedJobs(readSettings(config).watchedJobs);
+    const jobs = await Promise.all(names.map(async (jobFullName) => {
+      try {
+        const job = (await apiByName.get("getJob").call(config, { jobFullName })).structuredContent;
+        return { jobFullName, url: job.url, build: job.lastBuild ?? null };
+      } catch (error) { return { jobFullName, url: new URL(`${jobPath(jobFullName)}/`, config.baseUrl).toString(), error: error.message }; }
+    }));
+    return response({ jobs });
+  }
+  if (name === "checkJenkinsConnection") {
+    const checks = [];
+    async function check(capability, action) {
+      try { const result = await action(); checks.push({ capability, status: "available" }); return result; }
+      catch (error) { checks.push({ capability, status: /HTTP 403/.test(error.message) ? "denied" : /HTTP 404/.test(error.message) ? "unavailable" : "error", message: error.message }); return null; }
+    }
+    const listed = await check("任务读取", () => apiByName.get("getJobs").call(config, {}));
+    const candidate = listed?.structuredContent?.jobs?.find((job) => job.lastBuild?.number);
+    const name = watchedJobs(readSettings(config).watchedJobs)[0] || candidate?.fullName || candidate?.name;
+    if (name) {
+      const job = await check("指定任务", () => apiByName.get("getJob").call(config, {jobFullName:name}));
+      await check("参数定义", () => apiByName.get("getJobParameters").call(config, {jobFullName:name}));
+      if (job?.structuredContent.lastBuild?.number) {
+        const exact = {jobFullName:name,buildNumber:job.structuredContent.lastBuild.number};
+        await check("构建读取", () => apiByName.get("getBuild").call(config, exact));
+        await check("日志读取", () => apiByName.get("getBuildLog").call(config, exact));
+        const stages = await callUiTool(config,"uiGetBuildStages",exact).catch(() => null);
+        checks.push({capability:"Pipeline 阶段",status:stages?.structuredContent.available ? "available" : stages?.structuredContent.reason === "permission_denied" ? "denied" : "unavailable"});
+      } else checks.push({capability:"构建、日志和阶段",status:"unknown",message:"没有可用于检测的既有构建"});
+    } else checks.push({capability:"参数、构建、日志和阶段",status:"unknown",message:"没有可用于检测的任务"});
+    checks.push({capability:"触发构建权限",status:"unknown",message:"只读检测无法确认执行权限，未触发构建"});
+    if (config.mode === "mcp") checks.push({capability:"上游 MCP",status:"unknown",message:"本页检查 REST 读取；MCP 连接由模型读取工具另行验证"});
+    return { ...response({ checks }), _meta: { card: { view:"connection",checks,autoExpand:false } } };
+  }
   if (name === "showJenkinsTriggerConfirmation") {
     const result = await apiByName.get("getJobParameters").call(config, args);
     return cardResponse({ view: "confirmation", jobFullName: args.jobFullName, parameters: prepareParameters(result.structuredContent.parameters, args.parameters) });
@@ -116,7 +150,7 @@ export async function callUiTool(config, name, args) {
     ]);
     return response({ jobFullName: args.jobFullName, build,
       stages: stages.status === "fulfilled" ? stages.value.structuredContent : { available: false, reason: "request_failed", message: stages.reason.message },
-      log: log.status === "fulfilled" ? { ...logEvidence(log.value.structuredContent.log), truncated: Boolean(log.value.structuredContent.truncated) } : { lines: [], error: log.reason.message },
+      log: log.status === "fulfilled" ? { ...logEvidence(log.value.structuredContent.log, readSettings(config).evidenceLines), truncated: Boolean(log.value.structuredContent.truncated) } : { lines: [], error: log.reason.message },
       changes: changes.status === "fulfilled" ? changes.value : { available: false, reason: changes.reason.message, commits: [] },
     });
   }

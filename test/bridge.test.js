@@ -19,7 +19,8 @@ const installedCopy = join(testRoot, "jenkins");
 cpSync(join(process.cwd(), "release/jenkins"), installedCopy, { recursive: true });
 const bundledServer = join(installedCopy, "dist/server.mjs");
 const uiManifest = JSON.parse(readFileSync(join(installedCopy, "dist/ui/manifest.json"), "utf8"));
-const uiToolNames = ["openJenkinsWorkspace", "openJenkinsPanel", "showJenkinsTriggerConfirmation", "uiGetBuildEvidence", "showJenkinsBuildCard", "showJenkinsQueueCard", "showJenkinsJobChoices", "showJenkinsBuildComparison", "uiListJobs", "uiGetJob", "uiGetBuild", "uiGetBuildLog", "uiGetQueueItem", "uiTrackQueue", "uiGetBuildStages", "uiGetJobParameters", "uiGetGitParameterChoices"];
+const uiToolNames = ["openJenkinsWorkspace", "showJenkinsTriggerConfirmation", "uiGetBuildEvidence", "showJenkinsBuildCard", "showJenkinsQueueCard", "showJenkinsJobChoices", "showJenkinsBuildComparison", "uiGetWatchedJobs", "checkJenkinsConnection", "uiListJobs", "uiGetJob", "uiGetBuild", "uiGetBuildLog", "uiGetQueueItem", "uiTrackQueue", "uiGetBuildStages", "uiGetJobParameters", "uiGetGitParameterChoices"];
+const settingsNames = ["readJenkinsSettings", "updateJenkinsSettings"];
 const apiToolNames = ["getJobs", "getJob", "getJobParameters", "getGitParameterChoices", "getBuild", "getBuildLog", "getQueueItem", "triggerBuild"];
 after(() => rmSync(testRoot, { recursive: true, force: true }));
 
@@ -192,7 +193,7 @@ test("stdio MCP bridge reads and schedules through Jenkins API", async () => {
       },
     }));
     const tools = await client.listTools();
-    assert.deepEqual(tools.tools.map((tool) => tool.name), [...apiToolNames, ...uiToolNames]);
+    assert.deepEqual(tools.tools.map((tool) => tool.name), [...apiToolNames, ...uiToolNames, ...settingsNames]);
     assert.equal(tools.tools.find((tool) => tool.name === "triggerBuild").annotations.readOnlyHint, false);
     for (const tool of tools.tools) {
       assert.equal(tool.annotations.openWorldHint, false);
@@ -202,7 +203,7 @@ test("stdio MCP bridge reads and schedules through Jenkins API", async () => {
     assert.match(tools.tools.find((tool) => tool.name === "triggerBuild").description, /重复调用/);
     const workspaceTool = tools.tools.find((tool) => tool.name === "openJenkinsWorkspace");
     assert.equal(workspaceTool.title, "Jenkins");
-    assert.equal(workspaceTool.description, "打开 Jenkins 工作台");
+    assert.equal(workspaceTool.description, "查看关注任务的最新结果");
     assert.equal(workspaceTool._meta.ui.resourceUri, uiManifest.workspace.uri);
     assert.deepEqual(workspaceTool.icons.map((icon) => icon.theme), ["light", "dark"]);
     for (const icon of workspaceTool.icons) {
@@ -211,8 +212,17 @@ test("stdio MCP bridge reads and schedules through Jenkins API", async () => {
       assert.match(Buffer.from(icon.src.split(",")[1], "base64").toString("utf8"), /viewBox="0 0 512 512"/);
     }
     assert.deepEqual(client.getServerVersion().icons, workspaceTool.icons);
-    assert.deepEqual(tools.tools.find((tool) => tool.name === "openJenkinsPanel")._meta["openai/ui"].entrypoints, [{ type: "thread" }]);
-    assert.equal(tools.tools.find((tool) => tool.name === "openJenkinsPanel").title, "Jenkins 构建");
+    assert.ok(!tools.tools.some((tool) => tool.name === "openJenkinsPanel"));
+    assert.deepEqual(client.getServerCapabilities().experimental["openai/settings"], {readTool:"readJenkinsSettings",updateTool:"updateJenkinsSettings"});
+    const settings = await client.callTool({name:"readJenkinsSettings",arguments:{}});
+    assert.deepEqual(settings.structuredContent.values,{watchedJobs:"",evidenceLines:3});
+    assert.equal((await client.callTool({name:"updateJenkinsSettings",arguments:{set:{evidenceLines:11}}})).isError,true);
+    assert.equal((await client.callTool({name:"updateJenkinsSettings",arguments:{set:{watchedJobs:"folder/build main"}}})).structuredContent.values.evidenceLines,3);
+    const watched = await client.callTool({name:"uiGetWatchedJobs",arguments:{}});
+    assert.equal(watched.structuredContent.jobs.length,1);
+    const connection = await client.callTool({name:"checkJenkinsConnection",arguments:{}});
+    assert.equal(connection._meta.card.checks.find((check)=>check.capability === "触发构建权限").status,"unknown");
+    assert.equal(calls.filter((call)=>call.method === "POST").length,0);
     assert.deepEqual(tools.tools.find((tool) => tool.name === "uiGetBuild")._meta.ui.visibility, ["app"]);
     assert.deepEqual(tools.tools.find((tool) => tool.name === "uiGetJobParameters")._meta.ui.visibility, ["app"]);
     const resources = await client.listResources();
@@ -344,7 +354,7 @@ test("MCP mode forwards allowed Jenkins tools and hides replay tools", async () 
       },
     }));
     const tools = await client.listTools();
-    assert.deepEqual(tools.tools.map((tool) => tool.name), ["getStatus", "getJobs", "triggerBuild", "getJobParameters", "getGitParameterChoices", ...uiToolNames]);
+    assert.deepEqual(tools.tools.map((tool) => tool.name), ["getStatus", "getJobs", "triggerBuild", "getJobParameters", "getGitParameterChoices", ...uiToolNames, ...settingsNames]);
     const trigger = tools.tools.find((tool) => tool.name === "triggerBuild");
     assert.deepEqual(trigger.annotations, { readOnlyHint: false, destructiveHint: true, openWorldHint: false });
     assert.match(trigger.description, /仅在用户明确要求.*重复调用/);

@@ -26,7 +26,7 @@ try {
   const hash = createHash("sha256").update(packageVersion).update(script).update(style).digest("hex").slice(0, 12);
   const manifest = {};
   mkdirSync(join(staging, "dist/ui"), { recursive: true });
-  for (const mode of ["workspace", "panel", "card"]) {
+  for (const mode of ["workspace", "card"]) {
     const file = `${mode}-${hash}.html`;
     manifest[mode] = { mode, file, uri: `ui://jenkins/${file}` };
     writeFileSync(join(staging, "dist/ui", file), `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${style}</style></head><body data-mode="${mode}" data-ui-version="${packageVersion}"><div id="root"></div><script>${script.replaceAll("</script", "<\\/script")}</script></body></html>`);

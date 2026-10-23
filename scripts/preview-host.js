@@ -9,7 +9,7 @@ const requestedQueue = Number(query.get("queue"));
 const initialTheme = query.get("theme") === "dark" ? "dark" : "light";
 const live = document.body.dataset.live === "true";
 const iframe = document.querySelector("iframe");
-iframe.src = `/widget/${["workspace", "panel", "card"].includes(mode) ? mode : "workspace"}`;
+iframe.src = `/widget/${["workspace", "card"].includes(mode) ? mode : "workspace"}`;
 
 const jobs = [
   { name: "checkout-api", fullName: "platform/checkout-api", color: "red", lastBuild: { number: 284, result: "FAILURE", timestamp: Date.now() - 600000, duration: 252000 } },
@@ -57,6 +57,7 @@ bridge.oncalltool = async ({ name, arguments: args }) => {
     const response = await fetch("/tool", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, arguments: args ?? {} }) });
     return response.json();
   }
+  if (name === "uiGetWatchedJobs") return reply({ jobs: jobs.map((job)=>({jobFullName:job.fullName,url:`https://jenkins.example.com/job/${job.name}/`,build:buildFor(job.fullName)})) });
   if (name === "uiGetBuildEvidence") return reply({ build: scenarioBuild(), stages: { available: true, stages: [{name:"检出",status:"SUCCESS",durationMillis:6000},{name:"构建",status:"SUCCESS",durationMillis:70000},{name:"部署",status:"FAILED",durationMillis:42000}] }, log: { lines: [{number:109,text:"Readiness probe: GET /healthz → 404"},{number:110,text:"ERROR: Readiness probe failed"},{number:111,text:"ERROR: pod checkout-api not ready"}], readLines: 1204, truncated: false }, changes: { available:true,baselineBuildNumber:283,commits:[{commitId:"9f3c2ab",msg:"health: move readiness to /health",author:"Alex"}] } });
   if (name === "uiListJobs") return reply({ jobs });
   if (name === "uiGetJob") return reply({ jobs, lastBuild: buildFor(args.jobFullName) });

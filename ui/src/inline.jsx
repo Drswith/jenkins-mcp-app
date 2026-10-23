@@ -164,7 +164,9 @@ export function InlineCard({ ready, initial, input, hostError, call, bridge, hos
   if (fullscreen && data.view === "card") return <EvidenceView data={data} bridge={bridge} call={call} hostContext={hostContext} close={closeEvidence} />;
   const jobName = data.jobFullName;
   let body;
-  if (data.view === "confirmation") {
+  if (data.view === "connection") {
+    body = <ul className="connection-checks">{data.checks.map((check) => <li key={check.capability}><span>{check.capability}</span><span className={check.status === "available" ? "tone-success" : check.status === "denied" ? "tone-danger" : "tone-secondary"}>{{available:"可用",denied:"无权限",unavailable:"不可用",unknown:"未验证",error:"读取失败"}[check.status]}</span>{check.message && <small>{check.message}</small>}</li>)}</ul>;
+  } else if (data.view === "confirmation") {
     body = <Confirmation key={JSON.stringify(data)} data={data} bridge={bridge} />;
   } else if (data.view === "queue") {
     const queue = data.queue ?? {};
@@ -201,5 +203,5 @@ export function InlineCard({ ready, initial, input, hostError, call, bridge, hos
     body = <><p className="inline-subtext">两次构建的结果与耗时</p><div className="inline-compare">{[data.before, data.after].map((build, index) => <div key={build.number}><small>{index === 0 ? "之前" : "之后"} · #{build.number}</small><StatusMark build={build} /><span>{duration(build.duration)}</span></div>)}</div><div className="inline-actions"><button className="primary" onClick={() => ask(`请比较 Jenkins 任务 ${jobName} 的构建 #${data.before.number} 和 #${data.after.number}，依据构建记录、提交和日志说明可证实的差异。`)}>让 Codex 比较</button>{data.after.url && <button className="secondary" onClick={() => open(data.after.url)}>在 Jenkins 打开</button>}</div></>;
   } else body = <p>暂不支持此卡片类型。</p>;
 
-  return <main className="inline-shell"><section className="inline-card" aria-label="构建卡片"><header>{jobName || (data.view === "comparison" ? "构建对比" : "选择任务")}</header>{body}{active && <small className="inline-updated">可见时自动刷新 · {updatedAt ? `${Math.max(0, Math.floor((now - updatedAt) / 1000))} 秒前更新` : "刚刚更新"}</small>}{notice && <div role="status">{notice}</div>}{issue && <div className="inline-error" role="alert">{issue}</div>}{draft && <textarea readOnly aria-label="待发送请求" value={draft} />}</section></main>;
+  return <main className="inline-shell"><section className="inline-card" aria-label="构建卡片"><header>{jobName || (data.view === "connection" ? "连接与权限" : data.view === "comparison" ? "构建对比" : "选择任务")}</header>{body}{active && <small className="inline-updated">可见时自动刷新 · {updatedAt ? `${Math.max(0, Math.floor((now - updatedAt) / 1000))} 秒前更新` : "刚刚更新"}</small>}{notice && <div role="status">{notice}</div>}{issue && <div className="inline-error" role="alert">{issue}</div>}{draft && <textarea readOnly aria-label="待发送请求" value={draft} />}</section></main>;
 }

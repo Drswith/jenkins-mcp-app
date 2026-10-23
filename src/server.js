@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { apiTools, publicTool, triggerDescription } from "./api.js";
 import { readConfig } from "./config.js";
 import { callUiTool, readUiResource, uiIcons, uiResources, uiTools } from "./ui.js";
+import { settingsTools, callSettingsTool } from "./settings.js";
 import { sanitizeToolResult } from "./sanitize.js";
 
 const pluginVersion = JSON.parse(readFileSync(new URL("../plugin.json", import.meta.url), "utf8")).version;
@@ -24,7 +25,7 @@ function validateApiArguments(tool, args) {
   if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("Arguments must be an object");
   for (const key of schema.required ?? []) if (!(key in args)) throw new Error(`Missing ${key}`);
   for (const [key, value] of Object.entries(args)) {
-    const property = schema.properties[key];
+    const property = Object.hasOwn(schema.properties, key) ? schema.properties[key] : null;
     if (!property) throw new Error(`Unknown argument ${key}`);
     if (property.type === "string" && (typeof value !== "string" || !value.trim() || (property.enum && !property.enum.includes(value)))) throw new Error(`${key} must be a supported nonempty string`);
     if (property.type === "integer" && (!Number.isInteger(value) || value < property.minimum)) throw new Error(`${key} must be a positive integer`);
@@ -73,13 +74,13 @@ export function createBridge(env = process.env) {
     return connecting;
   }
 
-  const server = new Server({ name: "jenkins-codex-plugin", version: pluginVersion, icons: uiIcons }, { capabilities: { tools: {}, resources: {} }, instructions: "Use read tools to identify the exact Jenkins job and build before acting. triggerBuild schedules work; call it only when the user requests a build. Jenkins permissions apply. For concise conversation UI, use showJenkinsQueueCard after triggerBuild returns a queue ID, showJenkinsBuildCard for one build, showJenkinsJobChoices for a short job selection, or showJenkinsBuildComparison for two builds. Never claim a Jenkins build has a numeric percent complete unless Jenkins supplies it." });
+  const server = new Server({ name: "jenkins-codex-plugin", version: pluginVersion, icons: uiIcons }, { capabilities: { tools: {}, resources: {}, experimental: { "openai/settings": { readTool: "readJenkinsSettings", updateTool: "updateJenkinsSettings" } } }, instructions: "Use read tools to identify the exact Jenkins job and build before acting. triggerBuild schedules work; call it only when the user requests a build. Jenkins permissions apply. For concise conversation UI, use showJenkinsTriggerConfirmation before a requested build, then triggerBuild only after explicit confirmation; use showJenkinsQueueCard after triggerBuild returns a queue ID, showJenkinsBuildCard for one build, showJenkinsJobChoices for a short job selection, or showJenkinsBuildComparison for two builds. Never claim a Jenkins build has a numeric percent complete unless Jenkins supplies it." });
 
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: uiResources }));
   server.setRequestHandler(ReadResourceRequestSchema, async ({ params }) => readUiResource(params.uri, config));
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    if (config.mode === "api") return { tools: [...apiTools.map(publicTool), ...uiTools] };
+    if (config.mode === "api") return { tools: [...apiTools.map(publicTool), ...uiTools, ...settingsTools] };
     const result = await (await upstream()).listTools();
     return {
       tools: [...result.tools.filter((tool) => allowed.has(tool.name)).map(withoutTreeSelector).map((tool) => ({
@@ -91,17 +92,22 @@ export function createBridge(env = process.env) {
           destructiveHint: tool.name === "triggerBuild",
           openWorldHint: false,
         },
-      })), ...apiTools.filter((tool) => localApiToolNames.has(tool.name)).map(publicTool), ...uiTools],
+      })), ...apiTools.filter((tool) => localApiToolNames.has(tool.name)).map(publicTool), ...uiTools, ...settingsTools],
     };
   });
 
   server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
-    const appOnly = uiTools.some((entry) => entry.name === params.name && entry._meta?.ui?.visibility?.includes("app") && !entry._meta.ui.visibility.includes("model"));
+    const appOnly = [...uiTools, ...settingsTools].some((entry) => entry.name === params.name && entry._meta?.ui?.visibility?.includes("app") && !entry._meta.ui.visibility.includes("model"));
     return sanitizeToolResult(params.name, await callTool(params), { appOnly });
   });
 
   async function callTool(params) {
     try {
+      const settingsTool = settingsTools.find((entry) => entry.name === params.name);
+      if (settingsTool) {
+        validateApiArguments(settingsTool, params.arguments ?? {});
+        return callSettingsTool(config, params.name, params.arguments ?? {});
+      }
       const uiTool = uiTools.find((entry) => entry.name === params.name);
       if (uiTool) {
         const args = params.arguments ?? {};

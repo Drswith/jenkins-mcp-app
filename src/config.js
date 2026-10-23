@@ -28,6 +28,7 @@ export function readConfig(env = process.env) {
   url.pathname = `${url.pathname.replace(/\/$/, "")}/`;
   return {
     mode,
+    settingsPath: `${env.JENKINS_CONFIG_FILE || join(homedir(), ".config", "jenkins-codex-plugin", "config.json")}.settings.json`,
     baseUrl: url,
     authorization: `Basic ${Buffer.from(`${values.JENKINS_USER}:${values.JENKINS_API_TOKEN}`).toString("base64")}`,
   };
