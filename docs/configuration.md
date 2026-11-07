@@ -61,11 +61,12 @@ those effects may be irreversible. Each invocation schedules another build;
 never retry a submission automatically. User intent, parameter review and host
 approval safeguards remain necessary; annotations do not enforce permissions.
 
-The [plugin guidelines](https://developers.openai.com/plugins/plugin-guidelines#correct-annotation)
-say annotation justifications are no longer required, while the
-[review requirements](https://developers.openai.com/plugins/deploy/app-review)
-still request them. This rationale is retained; public submission requirements
-are **pending verification** before any public submission.
+The annotation rationale above is retained. As of 2026-11-07, official guidelines
+and remote review/error documentation still disagree about mandatory submission
+justifications; the local-MCP submission path is documented but requires an
+approved organization. Confirmed requirements, project gaps and the remaining
+policy questions are maintained in the
+[public submission assessment](https://github.com/Drswith/jenkins-mcp-app/blob/main/docs/public-submission.md).
 
 This package uses the Agent Plugins 1.0.0 schema. Root `skills/` is discovered
 automatically; a top-level `skills` field belongs to the Codex compatibility

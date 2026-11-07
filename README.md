@@ -10,7 +10,7 @@ An installable local OpenAI Codex plugin that packages a Jenkins MCP bridge and 
 - Open a small watched-jobs page; use Jenkins deep links for browsing and administration.
 - Keep credentials private and separate from the two display settings; mask secrets on every tool response.
 
-This is a local plugin. It includes built MCP Apps UI resources for compatible hosts, but does not include a public MCP endpoint or hosted authentication. Private ChatGPT testing can use a [Secure MCP Tunnel](https://developers.openai.com/plugins/deploy/connect-chatgpt). Public submission requirements remain **pending verification** before publication; the annotation-guidance conflict and retained rationale are recorded in [configuration](docs/configuration.md#tool-annotations-and-packaging).
+This is a local plugin. It includes built MCP Apps UI resources for compatible hosts, but does not include a public MCP endpoint or hosted authentication. Private ChatGPT testing can use a [Secure MCP Tunnel](https://developers.openai.com/plugins/deploy/connect-chatgpt). Official documentation now describes an approved-partner desktop-only submission path for local MCP plugins. This project has not been submitted or approved; organization eligibility, connector-policy applicability and conflicting annotation-justification requirements remain unresolved. See the [public submission assessment](docs/public-submission.md) checked on 2026-11-07 and the retained [tool annotation rationale](docs/configuration.md#tool-annotations-and-packaging).
 
 The installable package is **`release/jenkins/`**. Its contents are built ahead of installation: bundled Node executables, two self-contained UI resources, plugin manifests, skills, one configuration guide, icon and license. The marketplace points at that directory. Codex does not install this repository's `src/`, `ui/src/`, `test/`, `node_modules/`, package manifest or lock file.
 
@@ -36,6 +36,7 @@ Installed users need Node.js to run the already bundled server, but do not need 
 - [SG demo jobs, build history and Git collaboration data](docs/demo-data.md)
 - [Multibranch discovery, PR webhooks and daily history](docs/multibranch-history.md)
 - [Internal Jenkins target compatibility baseline](docs/target-compatibility.md)
+- [Public submission requirements and remaining work](docs/public-submission.md)
 - [SG Jenkins 2.263.1 API compatibility test](docs/legacy-test.md)
 - [Contributor rules](AGENTS.md)
 
